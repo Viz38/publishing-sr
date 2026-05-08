@@ -79,11 +79,21 @@ check_status() {
 }
 
 check_for_updates() {
+    if [ ! -d ".git" ]; then
+        echo -e "${RED}❌ Error: This folder was not cloned via Git.${NC}"
+        echo -e "${YELLOW}Updates are only supported if the repository was cloned using 'git clone'.${NC}"
+        return
+    fi
     echo -e "${BLUE}🔍 Checking for updates...${NC}"
     git fetch origin main &>/dev/null
     
-    local LOCAL=$(git rev-parse @)
-    local REMOTE=$(git rev-parse @{u})
+    local LOCAL=$(git rev-parse @ 2>/dev/null)
+    local REMOTE=$(git rev-parse @{u} 2>/dev/null)
+    
+    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
+        echo -e "${RED}Error: Could not check version. Check your internet connection.${NC}"
+        return
+    fi
     
     if [ "$LOCAL" != "$REMOTE" ]; then
         echo -e "${YELLOW}✨ New updates available!${NC}"
