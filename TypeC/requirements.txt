@@ -1,0 +1,29 @@
+aiohttp
+beautifulsoup4
+camoufox
+certifi
+click
+curl_cffi
+fastapi
+google-auth
+google-auth-httplib2
+google-auth-oauthlib
+gspread
+gspread-asyncio
+gspread-formatting
+h11
+lxml
+oauth2client
+openpyxl
+patchright
+psutil
+pydantic
+pydantic-settings
+pyobjc-core==10.3; sys_platform == 'darwin'
+pyobjc==10.3; sys_platform == 'darwin'
+python-dotenv
+requests
+scrapling
+typing-extensions
+uvicorn[standard]
+uvloop

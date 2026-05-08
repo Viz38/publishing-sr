@@ -1,0 +1,11 @@
+.env
+.venv/
+scratch/
+__pycache__/
+*.log
+.progress.json
+Type*/Logs/
+*.json
+!Type*/requirements.txt
+!sr_common/*.json
+!*.md
