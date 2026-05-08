@@ -102,6 +102,23 @@ check_for_updates() {
     fi
 }
 
+clear_logs() {
+    echo -e "${YELLOW}🧹 Clear Logs Menu:${NC}"
+    echo "1) Clear All Logs"
+    echo "2) Clear Type A Logs"
+    echo "3) Clear Type B Logs"
+    echo "4) Clear Type C Logs"
+    echo "5) Back"
+    read -p "Option [1-5]: " log_opt
+    case $log_opt in
+        1) rm -rf Type*/Logs/*; echo -e "${GREEN}All logs cleared.${NC}" ;;
+        2) rm -rf TypeA/Logs/*; echo -e "${GREEN}Type A logs cleared.${NC}" ;;
+        3) rm -rf TypeB/Logs/*; echo -e "${GREEN}Type B logs cleared.${NC}" ;;
+        4) rm -rf TypeC/Logs/*; echo -e "${GREEN}Type C logs cleared.${NC}" ;;
+        *) return ;;
+    esac
+}
+
 stop_all() {
     echo -e "${RED}🛑 Stopping all services...${NC}"
     pkill -f "uvicorn" 2>/dev/null
@@ -269,9 +286,10 @@ while true; do
     echo "4) Stop & Clean All"
     echo "5) View Live Logs"
     echo "6) Check for Updates"
-    echo "7) Exit"
+    echo "7) Clear Logs"
+    echo "8) Exit"
     echo -e "${BLUE}==========================================================${NC}"
-    read -p "Option [1-7]: " opt
+    read -p "Option [1-8]: " opt
     case $opt in
         1) 
             if [ -z "$PYTHON_CMD" ]; then echo -e "${RED}Error: No Python 3.10+ found!${NC}"; sleep 3; continue; fi
@@ -295,6 +313,7 @@ while true; do
         4) stop_all; read -p "Enter..." ;;
         5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/api.logs Type*/Logs/*Publishing.log 2>/dev/null; trap - INT ;;
         6) check_for_updates; read -p "Enter..." ;;
-        7) echo "Exiting. Engines remain active in background."; exit 0 ;;
+        7) clear_logs; read -p "Enter..." ;;
+        8) echo "Exiting. Engines remain active in background."; exit 0 ;;
     esac
 done
