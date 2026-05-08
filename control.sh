@@ -9,7 +9,7 @@
 # Add Homebrew to PATH for macOS
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
-BASE_DIR=$(pwd)
+BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 OS=$(uname -s)
 REAL_USER=${SUDO_USER:-$USER}
 
@@ -143,18 +143,23 @@ check_for_updates() {
 
 clear_logs() {
     echo -e "${YELLOW}🧹 Clear Logs Menu:${NC}"
-    echo "1) Clear All Logs"
+    echo "1) Clear All Logs (Including control.logs)"
     echo "2) Clear Type A Logs"
     echo "3) Clear Type B Logs"
     echo "4) Clear Type C Logs"
-    echo "5) Back"
-    read -p "Option [1-5]: " log_opt
+    echo "5) Clear control.logs Only"
+    echo "6) Back"
+    read -p "Option [1-6]: " log_opt
     case $log_opt in
-        1) rm -rf Type*/Logs/*; echo -e "${GREEN}All logs cleared.${NC}" ;;
-        2) rm -rf TypeA/Logs/*; echo -e "${GREEN}Type A logs cleared.${NC}" ;;
-        3) rm -rf TypeB/Logs/*; echo -e "${GREEN}Type B logs cleared.${NC}" ;;
-        4) rm -rf TypeC/Logs/*; echo -e "${GREEN}Type C logs cleared.${NC}" ;;
-        *) return ;;
+        1) 
+            rm -f Type*/Logs/*.log Type*/Logs/*.logs
+            > "$LOG_FILE"
+            echo -e "${GREEN}✅ All logs cleared.${NC}";;
+        2) rm -f TypeA/Logs/*.log TypeA/Logs/*.logs; echo -e "${GREEN}✅ Type A logs cleared.${NC}";;
+        3) rm -f TypeB/Logs/*.log TypeB/Logs/*.logs; echo -e "${GREEN}✅ Type B logs cleared.${NC}";;
+        4) rm -f TypeC/Logs/*.log TypeC/Logs/*.logs; echo -e "${GREEN}✅ Type C logs cleared.${NC}";;
+        5) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
+        *) return;;
     esac
 }
 
