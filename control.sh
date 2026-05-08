@@ -123,6 +123,7 @@ stop_all() {
     echo -e "${RED}🛑 Stopping all services...${NC}"
     pkill -f "uvicorn" 2>/dev/null
     pkill -f "main.py" 2>/dev/null
+    pkill -f "cloudflared" 2>/dev/null
     
     if [[ "$OS" == "Darwin" ]]; then
         local all_labels=("sr-typea" "sr-typeb" "sr-typec" "typea-api" "typeb-api" "typec-api" "com.tracxn.sr.typea" "com.tracxn.sr.typeb" "com.tracxn.sr.typec")
