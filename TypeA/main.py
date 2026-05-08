@@ -241,7 +241,7 @@ class TypeAPipeline:
                 
                 if res["type"] == "success":
                     if self.mode != "phase2":
-                        await r_q.put({'range': f"I{idx}:S{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"]]]})
+                        await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
                         await r_q.put({'range': f"X{idx}:Y{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                     
                     if self.mode != "phase1":

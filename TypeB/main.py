@@ -192,9 +192,9 @@ class TypeBPipeline:
                 
                 if res["type"] == "success":
                     if self.mode != "phase2":
-                        await r_q.put({'range': f"H{idx}:N{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"]]]})
-                        await r_q.put({'range': f"T{idx}:U{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                         hash_stat = "Yes" if res.get("hash_removed") else "No"
+                        await r_q.put({'range': f"H{idx}:P{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
+                        await r_q.put({'range': f"T{idx}:U{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                     else:
                         hash_stat = res.get("hash_status", "N/A")
                     
