@@ -11,11 +11,23 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 BASE_DIR=$(pwd)
 OS=$(uname -s)
+REAL_USER=${SUDO_USER:-$USER}
 
 # Centralized logging for control.sh
 LOG_FILE="$BASE_DIR/control.logs"
 exec > >(tee -a "$LOG_FILE") 2>&1
 echo -e "\n--- Session Started: $(date) ---"
+
+# Ensure dependencies on Ubuntu
+if [[ "$OS" == "Linux" ]]; then
+    for cmd in screen lsof; do
+        if ! command -v $cmd &>/dev/null; then
+            echo -e "${YELLOW}⚠️  $cmd is missing. Installing...${NC}"
+            sudo apt-get update && sudo apt-get install -y $cmd
+        fi
+    done
+fi
+
 FOLDERS=("TypeA" "TypeB" "TypeC")
 PORTS=(8767 8765 8766)
 NAMES=("sr-typea" "sr-typeb" "sr-typec")
@@ -283,7 +295,7 @@ Description=SR $f_label
 After=network.target
 [Service]
 Type=simple
-User=$USER
+User=$REAL_USER
 WorkingDirectory=$f_path
 ExecStart=$f_runner
 Restart=always
