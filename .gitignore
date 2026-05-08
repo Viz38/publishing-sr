@@ -3,9 +3,12 @@
 scratch/
 __pycache__/
 *.log
+*.logs
+**/Logs/
 .progress.json
-Type*/Logs/
 *.json
 !Type*/requirements.txt
 !sr_common/*.json
-!*.md
+CHANGELOG.md
+GEMINI.md
+docs/
