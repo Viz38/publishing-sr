@@ -251,8 +251,8 @@ class TypeAPipeline:
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         
                         bm_up, fun_up = "N/A", "N/A"
+                        f_id = res["feed_id"] or f_ids.get(res["bm_name"])
                         if edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts") and res["bm_id"] != "No ID":
-                            f_id = res["feed_id"]
                             if f_id:
                                 s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
                                 bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
@@ -260,9 +260,7 @@ class TypeAPipeline:
                                 if bm_up in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts"):
                                     ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
                                     fun_up = "Done" if ms in (200, 201) else ("Duplicate/Already Moved" if ms == 422 else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                        await r_q.put({'range': f"T{idx}:W{idx}", 'values': [[res["feed_id"], edits, bm_up, fun_up]]})
-                        await r_q.put({'type': 'progress', 'is_success': edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
-                        await r_q.put({'range': f"T{idx}:W{idx}", 'values': [[res["feed_id"], edits, bm_up, fun_up]]})
+                        await r_q.put({'range': f"T{idx}:W{idx}", 'values': [[f_id, edits, bm_up, fun_up]]})
                         await r_q.put({'type': 'progress', 'is_success': (edits == "Done")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
