@@ -131,10 +131,15 @@ class TypeCPipeline:
             await work_queue.put((idx, row))
 
         async with aiohttp.ClientSession() as session:
-            async with AsyncCamoufox(headless=True) as browser:
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+            if self.mode == "phase2":
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
+            else:
+                async with AsyncCamoufox(headless=True) as browser:
+                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                    writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
+                    await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map):
         while True:
@@ -144,11 +149,16 @@ class TypeCPipeline:
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
                     sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
-                    scrap_stat = row[7] # Col H is index 7
+                    scrap_stat = row[7] if len(row) > 7 else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
-                        res = {"type": "failed", "reason": "Missing Phase 1 inputs (SD/LD/DPID/FunnelID/ScrapStatus)"}
+                        res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
-                        res = {"type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id, "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]], "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [], "tokens": {"in":0, "out":0}}
+                        res = {
+                            "type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id,
+                            "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
+                            "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
+                            "tokens": {"in":0, "out":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
+                        }
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map)
                 
                 if res["type"] == "success":
