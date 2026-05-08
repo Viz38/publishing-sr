@@ -55,13 +55,25 @@ case "$CURRENT_USER" in
         ;;
 esac
 
+check_port() {
+    local port=$1
+    if command -v lsof &>/dev/null; then
+        lsof -Pi :$port -sTCP:LISTEN -t >/dev/null
+        return $?
+    elif command -v ss &>/dev/null; then
+        ss -ltn | grep -q ":$port "
+        return $?
+    else
+        netstat -ltn | grep -q ":$port "
+        return $?
+    fi
+}
+
 check_status() {
     echo -e "${BLUE}📡 System Status:${NC}"
     for i in "${!FOLDERS[@]}"; do
-        local p="${PORTS[$i]}"
-        local pid=$(lsof -Pi :$p -sTCP:LISTEN -t 2>/dev/null)
-        if [ -n "$pid" ]; then
-            echo -e "   ▶ ${NAMES[$i]}: ${GREEN}ONLINE${NC} (PID: $pid | Port: $p)"
+        if check_port ${PORTS[$i]}; then
+            echo -e "   ▶ ${NAMES[$i]}: ${GREEN}ONLINE${NC} (Port ${PORTS[$i]})"
         else
             echo -e "   ▶ ${NAMES[$i]}: ${RED}OFFLINE${NC}"
         fi
@@ -164,9 +176,9 @@ verify_port() {
     local port=$1
     local name=$2
     echo -ne "   ⏳ Waiting for $name (Port $port)..."
-    for i in {1..12}; do
-        if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null; then
-            echo -e " ${GREEN}OK${NC}"
+    for i in {1..10}; do
+        if check_port $port; then
+            echo -e " ${GREEN}ONLINE${NC}"
             return 0
         fi
         sleep 1
