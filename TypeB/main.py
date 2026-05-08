@@ -171,7 +171,12 @@ class TypeBPipeline:
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
-                    res = {"type": "success", "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [], "sd": row[h_map["sd"]], "ld": row[h_map["ld"]], "bm_id": row[13], "feed_id": row[h_map["feed_id"]], "feedcheck": row[10], "bm_res": row[11], "bm_name": row[12], "tokens": {"in":0, "out":0}}
+                    sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
+                    scrap_stat = row[7] # Col H is index 7
+                    if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
+                        res = {"type": "failed", "reason": "Missing Phase 1 inputs (SD/LD/DPID/FunnelID/ScrapStatus)"}
+                    else:
+                        res = {"type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [], "sd": sd, "ld": ld, "bm_id": row[13], "feed_id": row[h_map["feed_id"]], "feedcheck": row[10], "bm_res": row[11], "bm_name": row[12], "tokens": {"in":0, "out":0}}
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map)
                 
                 if res["type"] == "success":
