@@ -217,7 +217,8 @@ class TypeBPipeline:
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
-                    await r_q.put({'range': f"H{idx}:N{idx}", 'values': [["No", "Failed", res.get("reason", ""), "", "", "", ""]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"H{idx}:N{idx}", 'values': [["No", "Failed", res.get("reason", ""), "", "", "", ""]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()
 

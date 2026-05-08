@@ -264,7 +264,8 @@ class TypeAPipeline:
                         await r_q.put({'type': 'progress', 'is_success': (edits == "Done")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
-                    await r_q.put({'range': f"I{idx}", 'values': [["Failed"]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"I{idx}", 'values': [["Failed"]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()
 

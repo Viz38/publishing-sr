@@ -115,7 +115,7 @@ class TypeCPipeline:
         all_rows = await ws.get_all_values()
         h_map = {
             "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
-            "skip": 7, "sd": 9, "ld": 10, "feed_id": 11, "funnel_name": 3
+            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
         }
         all_rows = await ws.get_all_values()
         data_rows = [r for r in all_rows[self.start_row-1:] if len(r) > 1 and r[1].strip()]
@@ -127,7 +127,7 @@ class TypeCPipeline:
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
         for idx, row in enumerate(data_rows, start=self.start_row):
-            if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
+            # No explicit skip column in Type C currently, or it clashing with Scrap Status
             await work_queue.put((idx, row))
 
         async with aiohttp.ClientSession() as session:
@@ -191,7 +191,8 @@ class TypeCPipeline:
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
-                    await r_q.put({'range': f"H{idx}:J{idx}", 'values': [["No", "Failed", res.get("reason", "Unknown")]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"H{idx}:J{idx}", 'values': [["No", "Failed", res.get("reason", "Unknown")]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()
 
