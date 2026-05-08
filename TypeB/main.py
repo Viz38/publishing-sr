@@ -184,6 +184,7 @@ class TypeBPipeline:
                         res = {
                             "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "sd": sd, "ld": ld,
                             "feed_id": row[15], "feedcheck": row[10], "bm_res": row[11], "bm_name": row[12], "bm_id": row[13],
+                            "hash_status": row[14] if len(row) > 14 else "N/A",
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -193,12 +194,15 @@ class TypeBPipeline:
                     if self.mode != "phase2":
                         await r_q.put({'range': f"H{idx}:N{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"]]]})
                         await r_q.put({'range': f"T{idx}:U{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
+                        hash_stat = "Yes" if res.get("hash_removed") else "No"
+                    else:
+                        hash_stat = res.get("hash_status", "N/A")
                     
                     if self.mode != "phase1":
                         tags = res["hashtags"] + ["bu_llm_sd_ld", "llmbasedpublishing"]
                         if res["feedcheck"] == "Yes": tags.append("bu_llm_businessmodel_prediction")
                         sdld, bm, fun = "N/A", "N/A", "N/A"
-                        f_id = res["feed_id"] or f_ids.get(res["bm_name"])
+                        f_id = res["feed_id"] or f_ids.get(res["bm_name"]) or f_ids.get(row[3] if len(row) > 3 else "")
                         if res["feedcheck"] == "Yes" and res["bm_id"]:
                             s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data={"id": res["dp_id"], "description": {"value": res["ld"]}, "shortDescription": {"value": res["sd"]}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}, headers=HEADERS)
                             s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
@@ -213,7 +217,7 @@ class TypeBPipeline:
                             sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                             ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["591d37b884ae06633a652496"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
                             fun = "Sent discovery" if ms in (200, 201) else ("Duplicate/Already Moved" if ms == 422 else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                        await r_q.put({'range': f"O{idx}:S{idx}", 'values': [["N/A", f_id, sdld, bm, fun]]})
+                        await r_q.put({'range': f"O{idx}:S{idx}", 'values': [[hash_stat, f_id, sdld, bm, fun]]})
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:

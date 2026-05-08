@@ -251,7 +251,8 @@ class TypeAPipeline:
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         
                         bm_up, fun_up = "N/A", "N/A"
-                        f_id = res["feed_id"] or f_ids.get(res["bm_name"])
+                        f_name = row[h_map["feed"]]
+                        f_id = res["feed_id"] or f_ids.get(res["bm_name"]) or f_ids.get(f_name)
                         if edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts") and res["bm_id"] != "No ID":
                             if f_id:
                                 s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
