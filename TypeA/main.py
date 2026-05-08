@@ -240,8 +240,9 @@ class TypeAPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)
                 
                 if res["type"] == "success":
-                    await r_q.put({'range': f"I{idx}:S{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"]]]})
-                    await r_q.put({'range': f"X{idx}:Y{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"I{idx}:S{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"]]]})
+                        await r_q.put({'range': f"X{idx}:Y{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                     
                     if self.mode != "phase1":
                         tags = res["hashtags"] + ["bu_llm_sd_ld", "bu_Internal_SRprocess_TypeA"]

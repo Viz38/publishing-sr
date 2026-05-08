@@ -190,8 +190,9 @@ class TypeBPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map)
                 
                 if res["type"] == "success":
-                    await r_q.put({'range': f"H{idx}:N{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"]]]})
-                    await r_q.put({'range': f"T{idx}:U{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"H{idx}:N{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"]]]})
+                        await r_q.put({'range': f"T{idx}:U{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                     
                     if self.mode != "phase1":
                         tags = res["hashtags"] + ["bu_llm_sd_ld", "llmbasedpublishing"]

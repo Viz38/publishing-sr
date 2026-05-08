@@ -162,7 +162,8 @@ class TypeCPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map)
                 
                 if res["type"] == "success":
-                    await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
+                    if self.mode != "phase2":
+                        await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
                     
                     if self.mode != "phase1":
                         tags = res["tags"] + ["bu_llm_typec_autopublish"]
