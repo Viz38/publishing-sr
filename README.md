@@ -70,4 +70,4 @@ The engine supports three distinct execution modes selectable in the UI:
 - **Auth**: All API requests require a `Bearer <SERVICE_AUTH_TOKEN>` header.
 - **Auto-Persistence**: On Ubuntu, use **Option 3** to install as a systemd service. The script automatically manages user permissions and service lifecycle.
 
-## 📝 Author
+
