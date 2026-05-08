@@ -11,6 +11,11 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 BASE_DIR=$(pwd)
 OS=$(uname -s)
+
+# Centralized logging for control.sh
+LOG_FILE="$BASE_DIR/control.logs"
+exec > >(tee -a "$LOG_FILE") 2>&1
+echo -e "\n--- Session Started: $(date) ---"
 FOLDERS=("TypeA" "TypeB" "TypeC")
 PORTS=(8767 8765 8766)
 NAMES=("sr-typea" "sr-typeb" "sr-typec")
