@@ -121,9 +121,6 @@ clear_logs() {
 
 stop_all() {
     echo -e "${RED}🛑 Stopping all services...${NC}"
-    pkill -f "uvicorn" 2>/dev/null
-    pkill -f "main.py" 2>/dev/null
-    pkill -f "cloudflared" 2>/dev/null
     
     if [[ "$OS" == "Darwin" ]]; then
         local all_labels=("sr-typea" "sr-typeb" "sr-typec" "typea-api" "typeb-api" "typec-api" "com.tracxn.sr.typea" "com.tracxn.sr.typeb" "com.tracxn.sr.typec")
@@ -133,7 +130,6 @@ stop_all() {
             rm "$HOME/Library/LaunchAgents/$n.plist" 2>/dev/null
         done
         for n in "${NAMES[@]}"; do screen -X -S "${n}_Engine" quit 2>/dev/null; done
-        sudo cloudflared service uninstall 2>/dev/null
     else
         for n in "${NAMES[@]}"; do
             sudo systemctl disable --now $n 2>/dev/null
@@ -141,6 +137,15 @@ stop_all() {
         done
         sudo systemctl daemon-reload
     fi
+    
+    # Unified Cloudflare Cleanup
+    sudo cloudflared service uninstall 2>/dev/null
+    
+    # Nuclear Cleanup for orphaned processes
+    pkill -f "uvicorn" 2>/dev/null
+    pkill -f "main.py" 2>/dev/null
+    pkill -f "cloudflared" 2>/dev/null
+    
     for p in "${PORTS[@]}"; do lsof -ti :$p | xargs kill -9 2>/dev/null; done
     echo -e "${GREEN}Cleanup complete.${NC}"
 }
