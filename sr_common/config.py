@@ -34,8 +34,9 @@ class Settings(BaseSettings):
     # Service Auth
     SERVICE_AUTH_TOKEN: str
 
-    class Config:
-        env_file = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
-        extra = "ignore"
+    model_config = {
+        "env_file": os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        "extra": "ignore"
+    }
 
 settings = Settings()
