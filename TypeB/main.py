@@ -154,6 +154,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
         scrap_logger.warning(f"TIER 1 ERR: {url} | {str(e)}")
 
     # --- TIER 2: CAMOUFOX ---
+    context = None
     try:
         scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url}")
         context = await browser.new_context(ignore_https_errors=True)
@@ -175,15 +176,15 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
             content = await page.content()
             if "sgcaptcha" not in content.lower() and len(content) > 500:
                 scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
-                await context.close()
                 return content, 200, "Success"
-            await context.close()
             scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
         else:
-            await context.close()
             scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
     except Exception as e:
         scrap_logger.warning(f"TIER 2 ERR: {url} | {str(e)}")
+    finally:
+        if context:
+            await context.close()
 
     # --- TIER 3: SCRAPLING STEALTH ---
     try:
