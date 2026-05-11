@@ -3,8 +3,10 @@
 scratch/
 __pycache__/
 *.log
+*.log*
 *.logs
 **/Logs/
+Logs/
 .progress.json
 *.json
 !Type*/requirements.txt
