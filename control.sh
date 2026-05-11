@@ -253,6 +253,7 @@ stop_all() {
 verify_port() {
     local port=$1
     local name=$2
+    local f_path=$3
     echo -ne "   ⏳ Waiting for $name (Port $port)..."
     sleep 2 # Give process a moment to bind
     for i in {1..15}; do
@@ -266,7 +267,11 @@ verify_port() {
     echo -e " ${RED}FAILED${NC}"
     log "ERROR" "Service $name failed to start on port $port"
     echo -e "${YELLOW}   Last logs from $name:${NC}"
-    tail -n 5 "$BASE_DIR/${FOLDERS[$((i-1))]}/Logs/api.logs" 2>/dev/null | sed 's/^/      /'
+    if [[ "$OS" == "Linux" ]] && systemctl is-active --quiet "$name" 2>/dev/null; then
+        sudo journalctl -u "$name" -n 5 --no-pager | sed 's/^/      /'
+    else
+        tail -n 5 "$f_path/Logs/api.logs" 2>/dev/null | sed 's/^/      /'
+    fi
     return 1
 }
 
@@ -300,7 +305,12 @@ start_standard() {
     echo -e "${BLUE}🚀 Starting Engines in Temp Persistent Background (via Screen)...${NC}"
     
     # Tunnel
-    echo -e "   ▶ Starting Tunnel..."
+    echo -e "🚀 Starting SR Publishing Engines..."
+    log "INFO" "Starting all engines"
+    
+    # Ensure sr_common is accessible
+    export PYTHONPATH="$BASE_DIR:$PYTHONPATH"
+    log "INFO" "PYTHONPATH set to $PYTHONPATH"
     sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
     if [[ "$OS" == "Darwin" ]]; then
         sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
@@ -327,7 +337,7 @@ start_standard() {
         mkdir -p "$f_path/Logs"
         create_runner "$f_path" "$f_port" "$f_label"
         screen -d -m -S "${f_label}_Engine" "$f_path/runner.sh"
-        verify_port $f_port $f_label
+        verify_port $f_port $f_label "$f_path"
     done
     echo -e "${GREEN}Engines and Tunnel active.${NC}"
 }
@@ -396,7 +406,7 @@ EOF"
             sudo systemctl daemon-reload
             sudo systemctl enable --now $f_label
         fi
-        verify_port $f_port $f_label
+        verify_port $f_port $f_label "$f_path"
     done
     echo -e "${GREEN}Services registered and persistent across reboots.${NC}"
 }
