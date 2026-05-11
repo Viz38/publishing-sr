@@ -96,8 +96,12 @@ case "$CURRENT_USER" in
         IDENTITY="Device-4230"
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
+    "tracxn-lp-599")
+        IDENTITY="Rajath (Production)"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
+        ;;
     *)
-        IDENTITY="Rajath (Default)"
+        IDENTITY="Generic (Default)"
         if [ -z "$TUNNEL_TOKEN" ]; then
             TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
             [ -z "$TUNNEL_TOKEN" ] && echo -e "${YELLOW}⚠️  Warning: No TUNNEL_TOKEN found for $IDENTITY. Tunnel may fail.${NC}"
