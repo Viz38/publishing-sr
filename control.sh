@@ -214,26 +214,23 @@ create_runner() {
     local f_path=$1
     local f_port=$2
     local f_label=$3
+    local runner="$f_path/runner.sh"
     # Robust permission fix: Reset Logs directory
     sudo mkdir -p "$f_path/Logs"
-    sudo rm -f "$f_path/Logs/api.logs"
-    sudo touch "$f_path/Logs/api.logs"
     sudo chown -R $REAL_USER:$REAL_USER "$f_path"
     sudo chmod -R 775 "$f_path/Logs"
+    # Create empty log file if not exists
+    sudo -u $REAL_USER touch "$f_path/Logs/api.logs"
     
     cat <<EOF > "$runner"
 #!/bin/bash
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
-export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 cd "$f_path"
-echo "--- Runner Started: \$(date) ---" >> "$f_path/Logs/api.logs"
-if [ ! -f "$f_path/.venv/bin/uvicorn" ]; then
-    echo "❌ ERROR: uvicorn not found in .venv" >> "$f_path/Logs/api.logs"
-    exit 1
-fi
-exec "$f_path/.venv/bin/uvicorn" api:app --host 0.0.0.0 --port $f_port --log-level info >> "$f_path/Logs/api.logs" 2>&1
+# Direct execution from venv to avoid activation issues
+export PYTHONPATH=\$PYTHONPATH:.
+./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 >> "$f_path/Logs/api.logs" 2>&1
 EOF
-    chmod 755 "$runner"
+    sudo chown $REAL_USER:$REAL_USER "$runner"
+    sudo chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
 }
 
