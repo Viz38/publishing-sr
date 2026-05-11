@@ -225,8 +225,8 @@ create_runner() {
     cat <<EOF > "$runner"
 #!/bin/bash
 cd "$f_path"
-# Direct execution from venv to avoid activation issues
-export PYTHONPATH=\$PYTHONPATH:.
+# Ensure project root is in PYTHONPATH for sr_common imports
+export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 ./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 >> "$f_path/Logs/api.logs" 2>&1
 EOF
     sudo chown $REAL_USER:$REAL_USER "$runner"
