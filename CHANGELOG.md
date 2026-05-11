@@ -1,3 +1,18 @@
+## [2026-05-11] Engine Stability & Resource Hardening (v6.8)
+Files changed:
+- Type*/main.py
+- control.sh
+Reason:
+Resolve critical stability issues across all publishing engines:
+- Fixed Scrapling IndentationError and duplicated code logic.
+- Resolved "Unknown parser argument: timeout" error by removing redundant Fetcher configuration.
+- Added Chromium installation to control.sh to support Tier 3 (Scrapling Stealth) fetchers.
+- Implemented global BROWSER_SEMAPHORE (3) to strictly limit concurrent browser contexts and prevent CPU spikes.
+- Fixed memory leaks in Tier 2/3 by enforcing context cleanup in finally blocks.
+- Reduced MAX_WORKERS to 3 for better stability on macOS Air hardware.
+Related tests:
+Manual validation of log streams and process lists.
+
 ## [2026-05-11] High-Resilience Scraping & Dependency Optimization
 Files changed:
 - TypeA/main.py, TypeB/main.py, TypeC/main.py
