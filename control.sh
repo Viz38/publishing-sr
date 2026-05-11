@@ -97,8 +97,8 @@ case "$CURRENT_USER" in
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
     "TRACXN-LP-599")
-        IDENTITY="Device-5990"
-        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_5990"
+        IDENTITY="Device-599"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_599"
         ;;
     *)
         IDENTITY="Generic (Default)"
