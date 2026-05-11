@@ -82,6 +82,9 @@ fi
 PYTHON_CMD=$(get_python)
 CURRENT_USER=$(whoami)
 
+# DEBUG
+echo "DEBUG: CURRENT_USER='$CURRENT_USER'"
+
 # Use existing TUNNEL_TOKEN if provided in .env, otherwise use identity-based detection
 case "$CURRENT_USER" in
     "vishnu")
