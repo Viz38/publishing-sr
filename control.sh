@@ -75,28 +75,33 @@ get_python() {
 }
 # Load environment variables from .env
 if [ -f ".env" ]; then
-    export $(grep -v '^#' .env | xargs)
+    # Improved .env loading to handle spaces and quotes
+    export $(grep -v '^#' .env | xargs -0 2>/dev/null || grep -v '^#' .env | xargs)
 fi
 
 PYTHON_CMD=$(get_python)
 CURRENT_USER=$(whoami)
 
+# Use existing TUNNEL_TOKEN if provided in .env, otherwise use identity-based detection
 case "$CURRENT_USER" in
     "vishnu")
         IDENTITY="Vishnu"
-        TUNNEL_TOKEN="$TUNNEL_TOKEN_VISHNU"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_VISHNU"
         ;;
     "tracxn-ds-499")
         IDENTITY="Device-4990"
-        TUNNEL_TOKEN="$TUNNEL_TOKEN_4990"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4990"
         ;;
     "tracxn-ds-423")
         IDENTITY="Device-4230"
-        TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
     *)
         IDENTITY="Rajath (Default)"
-        TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
+        if [ -z "$TUNNEL_TOKEN" ]; then
+            TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
+            [ -z "$TUNNEL_TOKEN" ] && echo -e "${YELLOW}⚠️  Warning: No TUNNEL_TOKEN found for $IDENTITY. Tunnel may fail.${NC}"
+        fi
         ;;
 esac
 
@@ -229,7 +234,8 @@ verify_port() {
     local port=$1
     local name=$2
     echo -ne "   ⏳ Waiting for $name (Port $port)..."
-    for i in {1..10}; do
+    sleep 2 # Give process a moment to bind
+    for i in {1..15}; do
         if check_port $port; then
             echo -e " ${GREEN}ONLINE${NC}"
             return 0
@@ -401,14 +407,18 @@ while true; do
                 echo -e "${BLUE}Initializing $f...${NC}"
                 mkdir -p "$f/Logs"
                 [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
-                if [[ "$OS" == "Linux" ]]; then
-                    echo -e "${BLUE}🐧 Installing Linux-specific browser dependencies...${NC}"
-                    "$f/.venv/bin/python" -m playwright install-deps 2>/dev/null
-                    "$f/.venv/bin/python" -m playwright install firefox chromium 2>/dev/null
-                else
-                    "$f/.venv/bin/python" -m playwright install firefox chromium 2>/dev/null
-                fi
+                
+                echo -e "   ▶ Installing Python dependencies..."
                 "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet
+                
+                if [[ "$OS" == "Linux" ]]; then
+                    echo -e "   ▶ Installing Linux-specific browser dependencies..."
+                    "$f/.venv/bin/python" -m patchright install-deps
+                    "$f/.venv/bin/python" -m patchright install firefox chromium
+                else
+                    echo -e "   ▶ Installing browser binaries..."
+                    "$f/.venv/bin/python" -m patchright install firefox chromium
+                fi
             done
             read -p "Init Done. Enter...";;
         2) start_standard; read -p "Enter..." ;;
