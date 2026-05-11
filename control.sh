@@ -58,7 +58,7 @@ echo -e "\n--- Session Started: $(date) ---" >> "$LOG_FILE"
 
 # Ensure dependencies on Ubuntu
 if [[ "$OS" == "Linux" ]]; then
-    for cmd in screen lsof cloudflared; do
+    for cmd in screen lsof cloudflared curl; do
         if ! command -v $cmd &>/dev/null; then
             echo -e "${YELLOW}⚠️  $cmd is missing. Installing...${NC}"
             log "INFO" "Installing missing dependency: $cmd"
@@ -72,6 +72,13 @@ if [[ "$OS" == "Linux" ]]; then
             fi
         fi
     done
+    
+    # Ensure build-essential and python3-dev for Python 3.13 compatibility
+    if ! dpkg -s build-essential &>/dev/null; then
+        echo -e "${YELLOW}⚠️  build-essential is missing. Installing...${NC}"
+        log "INFO" "Installing build-essential"
+        sudo apt-get update >> "$SETUP_LOG" 2>&1 && sudo apt-get install -y build-essential python3-dev >> "$SETUP_LOG" 2>&1
+    fi
 fi
 
 FOLDERS=("TypeA" "TypeB" "TypeC")
