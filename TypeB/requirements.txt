@@ -27,3 +27,4 @@ uvicorn[standard]
 uvloop
 msgspec
 httpx
+google-generativeai
