@@ -30,7 +30,8 @@ CONFIG = {
     "BM_MAPPING_SHEET_ID": "1kZpQYmsJTjNrNs3COfBPqJ9ne1rC1Lwlaw92YYMpjXo",
     "EXTRACTING_SHEET_NAME": "DB",
     "CREDENTIALS_FILE": os.path.join(os.path.dirname(os.path.abspath(__file__)), "TypeB.json"),
-    "MAX_WORKERS": 5,
+    "MAX_WORKERS": 3,
+    "MAX_CONCURRENT_BROWSERS": 3,
     "GEMINI_API_URL": settings.GEMINI_API_URL,
     "GEMINI_API_KEY": settings.TYPEB_GEMINI_API_KEY,
     "MAX_PROMPT_SIZE": settings.MAX_PROMPT_SIZE,
@@ -153,33 +154,39 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
     except Exception as e:
         scrap_logger.warning(f"TIER 1 ERR: {url} | {str(e)}")
 
+# Global semaphore to limit total parallel browser contexts to prevent CPU spikes
+BROWSER_SEMAPHORE = asyncio.Semaphore(CONFIG.get("MAX_CONCURRENT_BROWSERS", 3))
+
+async def save_snapshot(domain: str, html: str, reason: str):
+...
     # --- TIER 2: CAMOUFOX ---
     context = None
     try:
-        scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url}")
-        context = await browser.new_context(ignore_https_errors=True)
-        page = await context.new_page()
-        
-        # EXPLICIT MEDIA BLOCKING
-        async def block_media(route):
-            if route.request.resource_type in ["image", "media", "font"]:
-                await route.abort()
+        async with BROWSER_SEMAPHORE:
+            scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url}")
+            context = await browser.new_context(ignore_https_errors=True)
+            page = await context.new_page()
+            
+            # EXPLICIT MEDIA BLOCKING
+            async def block_media(route):
+                if route.request.resource_type in ["image", "media", "font"]:
+                    await route.abort()
+                else:
+                    await route.continue_()
+            
+            await page.route("**/*", block_media)
+            
+            response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            
+            if response and response.status == 200:
+                await asyncio.sleep(5)
+                content = await page.content()
+                if "sgcaptcha" not in content.lower() and len(content) > 500:
+                    scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
+                    return content, 200, "Success"
+                scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
             else:
-                await route.continue_()
-        
-        await page.route("**/*", block_media)
-        
-        response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        
-        if response and response.status == 200:
-            await asyncio.sleep(5)
-            content = await page.content()
-            if "sgcaptcha" not in content.lower() and len(content) > 500:
-                scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
-                return content, 200, "Success"
-            scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
-        else:
-            scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
+                scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
     except Exception as e:
         scrap_logger.warning(f"TIER 2 ERR: {url} | {str(e)}")
     finally:
@@ -188,19 +195,20 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
 
     # --- TIER 3: SCRAPLING STEALTH ---
     try:
-        from scrapling import StealthyFetcher
-        scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
-        # NEW: use async_fetch class method to avoid sync-loop crash
-        s_resp = await StealthyFetcher.async_fetch(url, headless=True, timeout=60)
-        
-        if s_resp.status == 200:
-            content = s_resp.text
-            if "sgcaptcha" not in content.lower():
-                scrap_logger.info(f"TIER 3 SUCCESS: {url} | Chars: {len(content)}")
-                return content, 200, "Success"
-            return None, 200, "Captcha Blocked"
-        else:
-            return None, s_resp.status, f"Status {s_resp.status}"
+        async with BROWSER_SEMAPHORE:
+            from scrapling import StealthyFetcher
+            scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
+            # NEW: use async_fetch class method to avoid sync-loop crash
+            s_resp = await StealthyFetcher.async_fetch(url, headless=True, timeout=60)
+            
+            if s_resp.status == 200:
+                content = s_resp.text
+                if "sgcaptcha" not in content.lower():
+                    scrap_logger.info(f"TIER 3 SUCCESS: {url} | Chars: {len(content)}")
+                    return content, 200, "Success"
+                return None, 200, "Captcha Blocked"
+            else:
+                return None, s_resp.status, f"Status {s_resp.status}"
     except Exception as e:
         scrap_logger.error(f"TIER 3 ERR: {url} | {str(e)}")
         return None, 0, "Fetch failed"
