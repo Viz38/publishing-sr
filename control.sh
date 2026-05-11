@@ -43,15 +43,26 @@ trap "rm -f $LOCK_FILE; exit" INT TERM EXIT
 
 # Centralized logging for control.sh
 LOG_FILE="$BASE_DIR/control.logs"
-exec > >(tee -a "$LOG_FILE") 2>&1
-echo -e "\n--- Session Started: $(date) ---"
+SETUP_LOG="$BASE_DIR/setup.logs"
+
+log() {
+    local level=$1
+    local msg=$2
+    local timestamp=$(date "+%Y-%m-%d %H:%M:%S")
+    echo -e "[$timestamp] $level: $msg" >> "$LOG_FILE"
+}
+
+# Redirect all output to control.logs but keep it clean
+# We'll use this for the main loop, but noisy commands will be silenced
+echo -e "\n--- Session Started: $(date) ---" >> "$LOG_FILE"
 
 # Ensure dependencies on Ubuntu
 if [[ "$OS" == "Linux" ]]; then
     for cmd in screen lsof; do
         if ! command -v $cmd &>/dev/null; then
             echo -e "${YELLOW}⚠️  $cmd is missing. Installing...${NC}"
-            sudo apt-get update && sudo apt-get install -y $cmd
+            log "INFO" "Installing missing dependency: $cmd"
+            sudo apt-get update >> "$SETUP_LOG" 2>&1 && sudo apt-get install -y $cmd >> "$SETUP_LOG" 2>&1
         fi
     done
 fi
@@ -82,11 +93,10 @@ fi
 PYTHON_CMD=$(get_python)
 CURRENT_USER=$(whoami)
 
-# DEBUG
-echo "DEBUG: CURRENT_USER='$CURRENT_USER'"
+# Normalize user for matching
+USER_LOWER=$(echo "$CURRENT_USER" | tr '[:upper:]' '[:lower:]')
 
-# Use existing TUNNEL_TOKEN if provided in .env, otherwise use identity-based detection
-case "$CURRENT_USER" in
+case "$USER_LOWER" in
     "vishnu")
         IDENTITY="Vishnu"
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_VISHNU"
@@ -99,19 +109,21 @@ case "$CURRENT_USER" in
         IDENTITY="Device-4230"
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
-    "TRACXN-LP-599" | "tracxn-lp-599")
+    "tracxn-lp-599")
         IDENTITY="Device-599"
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_599"
         ;;
     *)
         IDENTITY="Generic (Default)"
         if [ -z "$TUNNEL_TOKEN" ]; then
-            echo -e "${RED}❌ Error: No identity matched and no TUNNEL_TOKEN found in .env.${NC}"
+            log "ERROR" "No identity matched for user '$CURRENT_USER' and no TUNNEL_TOKEN found."
+            echo -e "${RED}❌ Error: No identity matched for user '$CURRENT_USER' and no TUNNEL_TOKEN found in .env.${NC}"
             echo -e "${YELLOW}Please add your username to control.sh or set TUNNEL_TOKEN in .env${NC}"
             exit 1
         fi
         ;;
 esac
+log "INFO" "Session started for $IDENTITY (User: $CURRENT_USER)"
 
 check_port() {
     local port=$1
@@ -246,11 +258,15 @@ verify_port() {
     for i in {1..15}; do
         if check_port $port; then
             echo -e " ${GREEN}ONLINE${NC}"
+            log "INFO" "Service $name started on port $port"
             return 0
         fi
         sleep 1
     done
     echo -e " ${RED}FAILED${NC}"
+    log "ERROR" "Service $name failed to start on port $port"
+    echo -e "${YELLOW}   Last logs from $name:${NC}"
+    tail -n 5 "$BASE_DIR/${FOLDERS[$((i-1))]}/Logs/api.logs" 2>/dev/null | sed 's/^/      /'
     return 1
 }
 
@@ -417,15 +433,18 @@ while true; do
                 [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
                 
                 echo -e "   ▶ Installing Python dependencies..."
-                "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet
+                log "INFO" "Installing Python dependencies for $f"
+                "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
                 
                 if [[ "$OS" == "Linux" ]]; then
                     echo -e "   ▶ Installing Linux-specific browser dependencies..."
-                    "$f/.venv/bin/python" -m patchright install-deps
-                    "$f/.venv/bin/python" -m patchright install firefox chromium
+                    log "INFO" "Installing Playwright browsers for $f (Linux)"
+                    "$f/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
+                    "$f/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
                 else
                     echo -e "   ▶ Installing browser binaries..."
-                    "$f/.venv/bin/python" -m patchright install firefox chromium
+                    log "INFO" "Installing Playwright browsers for $f (macOS)"
+                    "$f/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
                 fi
             done
             read -p "Init Done. Enter...";;
