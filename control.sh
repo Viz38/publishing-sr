@@ -58,11 +58,18 @@ echo -e "\n--- Session Started: $(date) ---" >> "$LOG_FILE"
 
 # Ensure dependencies on Ubuntu
 if [[ "$OS" == "Linux" ]]; then
-    for cmd in screen lsof; do
+    for cmd in screen lsof cloudflared; do
         if ! command -v $cmd &>/dev/null; then
             echo -e "${YELLOW}⚠️  $cmd is missing. Installing...${NC}"
             log "INFO" "Installing missing dependency: $cmd"
-            sudo apt-get update >> "$SETUP_LOG" 2>&1 && sudo apt-get install -y $cmd >> "$SETUP_LOG" 2>&1
+            if [[ "$cmd" == "cloudflared" ]]; then
+                echo -e "   ▶ Downloading cloudflared..."
+                curl -L --output /tmp/cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb >> "$SETUP_LOG" 2>&1
+                sudo dpkg -i /tmp/cloudflared.deb >> "$SETUP_LOG" 2>&1
+                rm /tmp/cloudflared.deb
+            else
+                sudo apt-get update >> "$SETUP_LOG" 2>&1 && sudo apt-get install -y $cmd >> "$SETUP_LOG" 2>&1
+            fi
         fi
     done
 fi
