@@ -97,14 +97,15 @@ case "$CURRENT_USER" in
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
     "tracxn-lp-599")
-        IDENTITY="Rajath (Production)"
-        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
+        IDENTITY="Device-5990"
+        [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_5990"
         ;;
     *)
         IDENTITY="Generic (Default)"
         if [ -z "$TUNNEL_TOKEN" ]; then
-            TUNNEL_TOKEN="$TUNNEL_TOKEN_DEFAULT"
-            [ -z "$TUNNEL_TOKEN" ] && echo -e "${YELLOW}⚠️  Warning: No TUNNEL_TOKEN found for $IDENTITY. Tunnel may fail.${NC}"
+            echo -e "${RED}❌ Error: No identity matched and no TUNNEL_TOKEN found in .env.${NC}"
+            echo -e "${YELLOW}Please add your username to control.sh or set TUNNEL_TOKEN in .env${NC}"
+            exit 1
         fi
         ;;
 esac
