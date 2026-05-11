@@ -317,7 +317,9 @@ class TypeBPipeline:
                 for r in fd_data[1:]:
                     if len(r) > 4: f_defs[r[1]] = r[4]
             except: pass
-        paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_all_values()) if any(r)]
+        pipeline_logger.info("Connecting to Paths worksheet...")
+        # Optimize: Get only first 20 columns of Paths
+        paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_values("A1:T50")) if any(r)]
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
         for idx, row in enumerate(data_rows, start=self.start_row):

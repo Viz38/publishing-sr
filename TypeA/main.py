@@ -335,9 +335,11 @@ class TypeAPipeline:
             "skip": 7, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19
         }
         
+        pipeline_logger.info("Connecting to Master Sheet...")
         m_sheet = await gc.open_by_key(self.config["MASTER_SHEET_ID"])
         f_lvl = await (await m_sheet.worksheet("1st Level")).get_all_values()
         s_lvl = await (await m_sheet.worksheet("2nd Level Live BM's")).get_all_values()
+        
         bm_mapping, bm_ids, bm_1st_stat = {}, {}, {}
         for r in f_lvl[1:]:
             if len(r) < 5: continue
@@ -351,9 +353,12 @@ class TypeAPipeline:
             bm_ids[p] = bid
             if f not in bm_mapping: bm_mapping[f] = {"1stLevel":[], "2ndLevel":[]}
             bm_mapping[f]["2ndLevel"].append([len(bm_mapping[f]["2ndLevel"])+1, ".", p, " -"+desc])
-
+ 
+        pipeline_logger.info("Connecting to Prompts & Feed Owner sheets...")
         prompts = [r[1] for r in (await (await (await gc.open_by_key(CONFIG["PROMPTS_SHEET_ID"])).worksheet("Prompts")).get_all_values())[1:10]]
         f_ids = {r[0]: r[1] for r in (await (await (await gc.open_by_key(CONFIG["FEED_OWNER_SHEET_ID"])).worksheet("Feed Owner Details")).get_all_values())}
+        
+        pipeline_logger.info("Connecting to Feed Definition sheets...")
         f_defs = {}
         for sid in [CONFIG["FEED_DEF_SHEET_ID_1"], CONFIG["FEED_DEF_SHEET_ID_2"]]:
             try:
@@ -361,7 +366,10 @@ class TypeAPipeline:
                 for r in fd_data[1:]:
                     if len(r) > 3: f_defs[r[1]] = r[3]
             except: pass
-        paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_all_values()) if any(r)]
+            
+        pipeline_logger.info("Connecting to Paths worksheet...")
+        # Optimize: Get only first 20 columns of Paths
+        paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_values("A1:T50")) if any(r)]
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
         for idx, row in enumerate(data_rows, start=self.start_row):
