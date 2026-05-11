@@ -257,18 +257,27 @@ class TypeCPipeline:
 
     async def run(self):
         pipeline_logger.info(f"PIPELINE START: Row {self.start_row} | Mode: {self.mode}")
+        self.report_progress(0, 0, 0, 0)
         # Start system monitoring
         asyncio.create_task(log_system_metrics())
+        
+        pipeline_logger.info("Connecting to Google Sheets...")
         gc = await GoogleSheetsClient.get_manager(self.config["CREDENTIALS_FILE"]).authorize()
         sheet = await gc.open_by_key(self.config["SHEET_ID"])
         ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
-        all_rows = await ws.get_all_values()
+        
+        pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
+        # Optimize: Only fetch from start_row onwards
+        all_rows = await ws.get_values(f"A{self.start_row}:Z")
+        data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip()]
+        total = len(data_rows)
+        pipeline_logger.info(f"Total rows to process: {total}")
+        self.report_progress(0, total, 0, 0)
+        
         h_map = {
             "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
             "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
         }
-        all_rows = await ws.get_all_values()
-        data_rows = [r for r in all_rows[self.start_row-1:] if len(r) > 1 and r[1].strip()]
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
