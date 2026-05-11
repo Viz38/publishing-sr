@@ -253,7 +253,14 @@ start_standard() {
         local f_path="$BASE_DIR/$f_name"
         local f_label="${NAMES[$i]}"
         
+        local f_creds="$f_path/${f_name}.json"
+        
         [ ! -d "$f_path/.venv" ] && { echo -e "${RED}❌ $f_name: Venv missing!${NC}"; continue; }
+        if [ ! -f "$f_creds" ]; then
+            echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds${NC}"
+            continue
+        fi
         
         echo -e "   ▶ Launching $f_label..."
         mkdir -p "$f_path/Logs"
@@ -282,6 +289,13 @@ start_service_mode() {
         local f_path="$BASE_DIR/$f_name"
         local f_label="${NAMES[$i]}"
         local f_runner="$f_path/runner.sh"
+        local f_creds="$f_path/${f_name}.json"
+        
+        if [ ! -f "$f_creds" ]; then
+            echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds${NC}"
+            continue
+        fi
         
         create_runner "$f_path" "$f_port" "$f_label"
         
