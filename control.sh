@@ -227,7 +227,8 @@ create_runner() {
 cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
-./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 >> "$f_path/Logs/api.logs" 2>&1
+export PYTHONUNBUFFERED=1
+./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     sudo chown $REAL_USER:$REAL_USER "$runner"
     sudo chmod +x "$runner"
