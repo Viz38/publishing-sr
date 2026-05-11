@@ -12,6 +12,34 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 OS=$(uname -s)
 REAL_USER=${SUDO_USER:-$USER}
+LOCK_FILE="/tmp/sr_control.lock"
+
+# --- Lock File Mechanism ---
+if [ -f "$LOCK_FILE" ]; then
+    OLD_PID=$(cat "$LOCK_FILE")
+    if ps -p "$OLD_PID" > /dev/null 2>&1; then
+        echo -e "\033[0;31m⚠️  Another instance of control.sh is already running (PID: $OLD_PID).\033[0m"
+        # Check if we are in an interactive terminal
+        if [ -t 0 ]; then
+            read -p "Would you like to kill it and start fresh? (y/n): " kill_confirm
+            if [[ "$kill_confirm" == "y" || "$kill_confirm" == "Y" ]]; then
+                kill -9 "$OLD_PID" 2>/dev/null
+                rm -f "$LOCK_FILE"
+            else
+                echo "Exiting."
+                exit 1
+            fi
+        else
+            echo "Non-interactive session detected. Killing old instance..."
+            kill -9 "$OLD_PID" 2>/dev/null
+            rm -f "$LOCK_FILE"
+        fi
+    else
+        rm -f "$LOCK_FILE"
+    fi
+fi
+echo $$ > "$LOCK_FILE"
+trap "rm -f $LOCK_FILE; exit" INT TERM EXIT
 
 # Centralized logging for control.sh
 LOG_FILE="$BASE_DIR/control.logs"
@@ -190,6 +218,8 @@ stop_all() {
     pkill -f "uvicorn" 2>/dev/null
     pkill -f "main.py" 2>/dev/null
     pkill -f "cloudflared" 2>/dev/null
+    pkill -f "firefox" 2>/dev/null
+    pkill -f "playwright" 2>/dev/null
     
     for p in "${PORTS[@]}"; do lsof -ti :$p | xargs kill -9 2>/dev/null; done
     echo -e "${GREEN}Cleanup complete.${NC}"
