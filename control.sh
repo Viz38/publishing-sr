@@ -338,8 +338,9 @@ while true; do
     echo "6) Check for Updates"
     echo "7) Clear Logs"
     echo "8) Exit"
+    echo "9) Deep Clean Workspace (Venvs + Browsers)"
     echo -e "${BLUE}==========================================================${NC}"
-    read -p "Option [1-8]: " opt
+    read -p "Option [1-9]: " opt
     case $opt in
         1) 
             if [ -z "$PYTHON_CMD" ]; then echo -e "${RED}Error: No Python 3.10+ found!${NC}"; sleep 3; continue; fi
@@ -348,7 +349,6 @@ while true; do
                 mkdir -p "$f/Logs"
                 [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
                 "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet
-                "$f/.venv/bin/python" -m patchright install chromium &>/dev/null
             done
             read -p "Init Done. Enter...";;
         2) start_standard; read -p "Enter..." ;;
@@ -361,9 +361,25 @@ while true; do
             fi
             read -p "Enter..." ;;
         4) stop_all; read -p "Enter..." ;;
-        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/api.logs Type*/Logs/*Publishing.log 2>/dev/null; trap - INT ;;
+        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs 2>/dev/null; trap - INT ;;
         6) check_for_updates; read -p "Enter..." ;;
         7) clear_logs; read -p "Enter..." ;;
         8) echo "Exiting. Engines remain active in background."; exit 0 ;;
+        9)
+            echo -e "${RED}⚠️  WARNING: This will delete all virtual environments and browser caches.${NC}"
+            read -p "Are you sure? (y/n): " confirm
+            if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+                stop_all
+                echo -e "${BLUE}🧹 Removing virtual environments...${NC}"
+                rm -rf Type*/.venv
+                echo -e "${BLUE}🧹 Removing browser caches...${NC}"
+                rm -rf "$HOME/Library/Caches/ms-playwright" 2>/dev/null
+                rm -rf "$HOME/.cache/ms-playwright" 2>/dev/null
+                rm -rf "$HOME/Library/Application Support/Camoufox" 2>/dev/null
+                echo -e "${BLUE}🧹 Removing logs...${NC}"
+                rm -rf Type*/Logs
+                echo -e "${GREEN}✅ Deep clean complete. Use Option 1 to reinstall.${NC}"
+            fi
+            read -p "Enter..." ;;
     esac
 done

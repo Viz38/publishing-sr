@@ -1,5 +1,31 @@
-# CHANGELOG
-All notable changes to this project are documented here.
+## [2026-05-11] High-Resilience Scraping & Dependency Optimization
+Files changed:
+- TypeA/main.py, TypeB/main.py, TypeC/main.py
+- TypeA/requirements.txt, TypeB/requirements.txt, TypeC/requirements.txt
+Reason:
+- Implemented 3-Tier (now 4-Tier) Fetching Strategy: Tier 0 (Basic HTTPX), Tier 1 (Scrapling Request), Tier 2 (Camoufox Browser), Tier 3 (Async Stealth Scrapling).
+- Resolved 'TypeError' crashes in Camoufox launch parameters.
+- Fixed Scrapling 0.4.8 API mismatches (status_code -> status, StealthFetcher -> StealthyFetcher, async_fetch).
+- Integrated explicit media blocking (Images/Fonts/Media) in browser tiers to optimize CPU/Bandwidth.
+- Standardized latest unpinned dependencies across all environments.
+Related tests:
+- Manual domain verification (teluu.com, rotarex.in, etc.)
+
+## [2026-05-11] High-Fidelity Five-Tier Logging & Full Observability
+Files changed:
+- TypeA/main.py, TypeB/main.py, TypeC/main.py (Updated)
+- TypeA/api.py, TypeB/api.py, TypeC/api.py (Updated)
+- sr_common/utils.py (Updated)
+- control.sh (Updated)
+Reason:
+- **Full Observability**: Implemented a comprehensive logging suite to capture 100% of background processes.
+  - **api.logs**: Detailed FastAPI request/response tracking, including full headers and bodies (Cloudflare/Apps Script).
+  - **scrap.logs**: Granular browser lifecycle events (navigation, settlement, content extraction).
+  - **pipeline.logs**: Deep execution tracking, including raw Gemini prompts and Tracxn JSON payloads.
+  - **system.logs**: Periodic health monitoring (CPU, Memory, Disk) to diagnose engine crashes.
+  - **HTML Snapshots**: Automatic saving of raw HTML to `Logs/Snapshots/` during failed or low-quality scrapes for visual debugging.
+- **API Hardening**: Refactored `sr_common/utils.py` to log raw JSON payloads for all external Tracxn and Gemini API interactions.
+- **Control Center**: Updated `control.sh` log viewer to support the new multi-tier structure.
 
 ## [2026-05-09] Backend Stabilization & Architectural Refactor
 Files changed:
@@ -173,3 +199,20 @@ Reason:
 - Enhanced `install.py` with `playwright install-deps` to ensure all necessary system libraries are installed on Ubuntu for Chromium to run correctly.
 Related tests:
 - Manual verification of logs revealed the missing dependency.
+
+## [2026-05-09] Configuration Stabilization & Remote Deployment
+Files changed:
+- sr_common/config.py
+- control.sh
+Reason:
+Fixed Pydantic ValidationError crash loop on remote devices. Implemented literal defaults and manual environment injection to ensure service startup even if .env is partially missing. Standardized log clearing in control.sh.
+Related tests:
+Manual verification on Device-4230 (Success: All engines ONLINE).
+
+## [2026-05-11] Fix sr-typec OFFLINE failure
+Files changed:
+- TypeC/.venv (Recreated)
+Reason:
+Resolved ModuleNotFoundError in TypeC by repairing a corrupted virtual environment.
+Related tests:
+Manual service startup verification on Port 8766.

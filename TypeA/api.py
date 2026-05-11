@@ -28,11 +28,32 @@ logger = logging.getLogger("api")
 app = FastAPI(title="SR Publishing Type A API")
 
 @app.middleware("http")
-async def log_requests(request, call_next):
-    logger.info(f"INCOMING REQ: {request.method} {request.url.path}")
+async def log_requests(request: Request, call_next):
+    # Capture Request Body
+    body = await request.body()
+    async def receive():
+        return {"type": "http.request", "body": body}
+    request._receive = receive
+
+    client_ip = request.headers.get("x-forwarded-for") or request.client.host
+    logger.info(f"REQ FROM {client_ip}: {request.method} {request.url.path} | Headers: {dict(request.headers)} | Body: {body.decode()[:2000]}")
+    
     response = await call_next(request)
-    logger.info(f"OUTGOING RES: {response.status_code}")
-    return response
+    
+    # Capture Response Body
+    from fastapi.responses import Response as FastApiResponse
+    res_body = b""
+    async for chunk in response.body_iterator:
+        res_body += chunk
+    
+    logger.info(f"RES TO {client_ip}: {response.status_code} | Body: {res_body.decode()[:2000]}")
+    
+    return FastApiResponse(
+        content=res_body,
+        status_code=response.status_code,
+        headers=dict(response.headers),
+        media_type=response.media_type
+    )
 
 app.add_middleware(
     CORSMiddleware,

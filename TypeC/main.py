@@ -11,11 +11,12 @@ import os
 import psutil
 from datetime import datetime
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
+from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.clients import RateLimiter, GoogleSheetsClient
-from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions
+from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain
 
 # Configuration
 CONFIG = {
@@ -48,51 +49,196 @@ MAIN_HEADERS = {
 # Configure logging
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Logs')
 os.makedirs(LOGS_DIR, exist_ok=True)
+
+def setup_logger(name, log_file, level=logging.INFO):
+    handler = logging.FileHandler(log_file, mode='a')
+    handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger = logging.getLogger(name)
+    logger.setLevel(level)
+    logger.addHandler(handler)
+    logger.propagate = False
+    return logger
+
+# 1. Scrap Logs
+scrap_logger = setup_logger('scrap', os.path.join(LOGS_DIR, 'scrap.logs'))
+# 2. Pipeline Logs
+pipeline_logger = setup_logger('pipeline', os.path.join(LOGS_DIR, 'pipeline.logs'))
+# 3. System Integrity Logs
+system_logger = setup_logger('system', os.path.join(LOGS_DIR, 'system.logs'))
+# 4. Root Logger (API)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOGS_DIR, 'TypeCPublishing.log'), mode="a"),
-        logging.StreamHandler()
+        logging.FileHandler(os.path.join(LOGS_DIR, 'api.logs'), mode="a")
     ]
 )
+
+# Snapshots directory for debug mode
+SNAPSHOTS_DIR = os.path.join(LOGS_DIR, 'Snapshots')
+os.makedirs(SNAPSHOTS_DIR, exist_ok=True)
+
+async def log_system_metrics():
+    """Background task to log system integrity metrics every 60 seconds."""
+    while True:
+        try:
+            cpu = psutil.cpu_percent()
+            mem = psutil.virtual_memory().percent
+            disk = psutil.disk_usage('/').percent
+            load = os.getloadavg() if hasattr(os, 'getloadavg') else (0,0,0)
+            system_logger.info(f"HEALTH: CPU: {cpu}% | RAM: {mem}% | DISK: {disk}% | LOAD: {load}")
+        except Exception as e:
+            system_logger.error(f"HEALTH_ERR: {str(e)}")
+        await asyncio.sleep(60)
 
 gemini_limiter = RateLimiter(2000)
 tracxn_limiter = RateLimiter(160)
 
-async def fetch_page(browser, url: str) -> Tuple[Optional[str], int]:
+async def save_snapshot(domain: str, html: str, reason: str):
+    """Saves HTML snapshot for debugging purposes."""
     try:
-        page = await browser.new_page()
-        response = await page.goto(url, wait_until="load", timeout=CONFIG["REQUEST_TIMEOUT"]*1000)
-        await asyncio.sleep(2)
-        await page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
-        await asyncio.sleep(1)
-        content = await page.content()
-        status = response.status if response else 0
-        await page.close()
-        return content, status
-    except: return None, 0
+        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+        safe_domain = re.sub(r'[^\w\-]', '_', domain)
+        filename = f"{safe_domain}_{reason}_{ts}.html"
+        filepath = os.path.join(SNAPSHOTS_DIR, filename)
+        with open(filepath, "w", encoding="utf-8") as f:
+            f.write(html)
+        scrap_logger.info(f"SNAPSHOT: Saved {filename} for debugging")
+    except Exception as e:
+        scrap_logger.error(f"SNAPSHOT_ERR: Could not save snapshot: {e}")
+
+from urllib.parse import urlparse
+
+async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
+    scrap_logger.info(f"FETCH START: {url}")
+    
+    # --- TIER 0: BASIC HTTPX ---
+    try:
+        import httpx
+        scrap_logger.info(f"TIER 0: Basic HTTPX Fetch for {url}")
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+            h_resp = await client.get(url, headers=MAIN_HEADERS)
+            if h_resp.status_code == 200:
+                content = h_resp.text
+                if "sgcaptcha" not in content.lower() and len(content) > 1000:
+                    scrap_logger.info(f"TIER 0 SUCCESS: {url} | Chars: {len(content)}")
+                    return content, 200, "Success"
+                scrap_logger.warning(f"TIER 0 FAIL: {url} | Reason: Captcha or Low Content")
+            else:
+                scrap_logger.warning(f"TIER 0 FAIL: {url} | Status: {h_resp.status_code}")
+    except Exception as e:
+        scrap_logger.warning(f"TIER 0 ERR: {url} | {str(e)}")
+
+    # --- TIER 1: SCRAPLING ---
+    try:
+        from scrapling import Fetcher
+        scrap_logger.info(f"TIER 1: Scrapling Request Fetch for {url}")
+        s_fetcher = Fetcher()
+        s_resp = s_fetcher.get(url, timeout=60, verify=False)
+        
+        if s_resp.status == 200:
+            content = s_resp.text
+            if "sgcaptcha" not in content.lower() and len(content) > 1000:
+                scrap_logger.info(f"TIER 1 SUCCESS: {url} | Chars: {len(content)}")
+                return content, 200, "Success"
+            scrap_logger.warning(f"TIER 1 FAIL: {url} | Reason: Captcha or Low Content")
+        else:
+            scrap_logger.warning(f"TIER 1 FAIL: {url} | Status: {s_resp.status}")
+    except Exception as e:
+        scrap_logger.warning(f"TIER 1 ERR: {url} | {str(e)}")
+
+    # --- TIER 2: CAMOUFOX ---
+    try:
+        scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url}")
+        context = await browser.new_context(ignore_https_errors=True)
+        page = await context.new_page()
+        
+        # EXPLICIT MEDIA BLOCKING
+        async def block_media(route):
+            if route.request.resource_type in ["image", "media", "font"]:
+                await route.abort()
+            else:
+                await route.continue_()
+        
+        await page.route("**/*", block_media)
+        
+        response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+        
+        if response and response.status == 200:
+            await asyncio.sleep(5)
+            content = await page.content()
+            if "sgcaptcha" not in content.lower() and len(content) > 500:
+                scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
+                await context.close()
+                return content, 200, "Success"
+            await context.close()
+            scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
+        else:
+            await context.close()
+            scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
+    except Exception as e:
+        scrap_logger.warning(f"TIER 2 ERR: {url} | {str(e)}")
+
+    # --- TIER 3: SCRAPLING STEALTH ---
+    try:
+        from scrapling import StealthyFetcher
+        scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
+        sf = StealthyFetcher(headless=True)
+        s_resp = await sf.async_fetch(url, timeout=60, verify=False)
+        
+        if s_resp.status == 200:
+            content = s_resp.text
+            if "sgcaptcha" not in content.lower():
+                scrap_logger.info(f"TIER 3 SUCCESS: {url} | Chars: {len(content)}")
+                return content, 200, "Success"
+            return None, 200, "Captcha Blocked"
+        else:
+            return None, s_resp.status, f"Status {s_resp.status}"
+    except Exception as e:
+        scrap_logger.error(f"TIER 3 ERR: {url} | {str(e)}")
+        return None, 0, "Fetch failed"
+
+    return None, 0, "Fetch failed"
 
 async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) -> Dict:
     domain = row[h_map["domain"]]
-    dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
+    pipeline_logger.info(f"PROCESS START: {domain}")
     
-    html, _ = await fetch_page(browser, f"https://{domain}")
-    if not html: return {"type": "error", "reason": "Fetch failed"}
+    html, _, reason = await fetch_page(browser, f"https://{domain}")
+    if not html: 
+        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
+        return {"type": "error", "reason": reason}
+        
     body = clean_html(html)
-    logging.info(f"Scraped {domain}: {len(body)} chars")
-    if len(body) < 100: return {"type": "error", "reason": "Low content"}
+    pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
+    
+    # Check for parked
+    parked, kw = is_parked_domain(html, body)
+    if parked:
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
+        return {"type": "error", "reason": "Parked"}
+    
+    if len(body) < 100: 
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
+        return {"type": "error", "reason": "Low content"}
+        
     p1 = prompts[0].replace("XX", body[:20000])
     res_obj = await call_gemini_api(session, p1, gemini_limiter)
     res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
     
-    sd_match = re.search(r'Short Description:\s*(.*)', res)
-    ld_match = re.search(r'Long Description:\s*(.*)', res)
-    sd = sd_match.group(1).strip() if sd_match else res[:100].strip()
-    ld = ld_match.group(1).strip() if ld_match else res.strip()
+    sd, ld = extract_descriptions(res)
+    if sd == "NO_DATA":
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
+        return {"type": "error", "reason": "Low content"}
+    if sd == "PARKED_LLM":
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
+        return {"type": "error", "reason": "Parked"}
     
-    if not sd or not ld or ld == "Error": return {"type": "error", "reason": "LLM failed"}
+    if not sd or not ld: 
+        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
+        return {"type": "error", "reason": "LLM failed"}
 
+    pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     return {
         "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p}, 
         "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], 
@@ -109,6 +255,9 @@ class TypeCPipeline:
         self.apply_formatting = True
 
     async def run(self):
+        pipeline_logger.info(f"PIPELINE START: Row {self.start_row} | Mode: {self.mode}")
+        # Start system monitoring
+        asyncio.create_task(log_system_metrics())
         gc = await GoogleSheetsClient.get_manager(self.config["CREDENTIALS_FILE"]).authorize()
         sheet = await gc.open_by_key(self.config["SHEET_ID"])
         ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
@@ -127,7 +276,7 @@ class TypeCPipeline:
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
         for idx, row in enumerate(data_rows, start=self.start_row):
-            # No explicit skip column in Type C currently, or it clashing with Scrap Status
+            # No explicit skip column in Type C currently
             await work_queue.put((idx, row))
 
         async with aiohttp.ClientSession() as session:
@@ -136,7 +285,13 @@ class TypeCPipeline:
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
-                async with AsyncCamoufox(headless=True) as browser:
+                async with AsyncCamoufox(
+                    headless=True,
+                    humanize=True,
+                    block_webrtc=True,
+                    os="windows",
+                    i_know_what_im_doing=True
+                ) as browser:
                     tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
                     writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
                     await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
@@ -145,6 +300,7 @@ class TypeCPipeline:
         while True:
             idx, row = await w_q.get()
             try:
+                domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
@@ -167,6 +323,7 @@ class TypeCPipeline:
                         await r_q.put({'range': f"O{idx}:P{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
                     
                     if self.mode != "phase1":
+                        pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
                         tags = res["tags"] + ["bu_llm_typec_autopublish"]
                         funnel_name = res["funnel_name"]
                         feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
@@ -191,9 +348,13 @@ class TypeCPipeline:
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
+                    reason = res.get('reason', 'Failed')
+                    pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                     if self.mode != "phase2":
-                        await r_q.put({'range': f"H{idx}:J{idx}", 'values': [["No", "Failed", res.get("reason", "Unknown")]]})
+                        await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
+            except Exception as e:
+                pipeline_logger.error(f"PIPELINE EXC: {str(e)}")
             finally: w_q.task_done()
 
     async def sheet_writer(self, r_q, ws, total):
@@ -214,11 +375,11 @@ class TypeCPipeline:
                         match = re.search(r'\d+', u['range'])
                         if match: processed_indices.add(int(match.group()))
                 except Exception as e:
-                    logging.error(f"SHEET WRITER ERR: {e}")
+                    pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
                     self.report_progress(len(processed_indices), total, success_count, fail_count)
-                    logging.info(f"PROGRESS: {len(processed_indices)}/{total} | Success: {success_count} | Fail: {fail_count}")
+                    pipeline_logger.info(f"PROGRESS: {len(processed_indices)}/{total} | Success: {success_count} | Fail: {fail_count}")
             else: self.report_progress(len(processed_indices), total, success_count, fail_count)
             await asyncio.sleep(1)
 

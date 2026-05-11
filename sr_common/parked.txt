@@ -1,0 +1,218 @@
+# --- ENGLISH (Sales, Parking, Leasing) ---
+domain is for sale
+this domain is for sale
+buy this domain
+domain parked
+parked domain
+powered by godaddy
+under construction
+coming soon
+registrar
+domain for sale
+interested in this domain
+renew this domain
+domain name is available
+get this domain
+purchase this domain
+contact the owner
+make an offer
+bid on this domain
+is available for purchase
+contact the domain owner
+domain is available
+for sale by owner
+lease this domain
+premium domain
+domain name for sale
+this site is under construction
+parked free
+# --- ENGLISH (Technical & Empty) ---
+vps-server
+default page
+plesk default
+cpanel default
+index of /
+web server is returning a 403
+404 not found
+403 forbidden
+404 error
+403 error
+502 bad gateway
+503 service unavailable
+server default page
+hosting default page
+account suspended
+cgi-sys/defaultwebpage.cgi
+webuzo
+softaculous
+# --- REGISTRARS & MARKETPLACES ---
+sedo.com
+dan.com
+afternic.com
+hugedomains
+domainmarket.com
+bodis.com
+domainnameapi.com
+namecheap.com
+dynadot.com
+porkbun.com
+uniregistry.com
+freenom.com
+registrar-servers.com
+domaincontrol.com
+parking-page
+parklogic.com
+domainactive.com
+# --- GERMAN (Verkauf & Parken) ---
+domain steht zum verkauf
+kaufen sie diese domain
+domain geparkt
+diese domain kaufen
+domain zum verkauf
+inhaber kontaktieren
+diese präsenz ist leider nicht erreichbar
+hier entsteht eine neue internetpräsenz
+# --- SPANISH (Venta & Estacionamiento) ---
+dominio en venta
+comprar este dominio
+dominio estacionado
+el dominio está a la venta
+póngase en contacto con el propietario
+dominio disponible
+en venta
+# --- FRENCH (Vente & Parking) ---
+domaine à vendre
+acheter ce domaine
+domaine parqué
+ce domaine est à vendre
+contacter le propriétaire
+ce domaine est disponible
+# --- CHINESE (Sales & Parking) ---
+此域名出售
+购买此域名
+域名停靠
+域名转让
+联系所有者
+域名预订
+该域名可以转让
+域名售卖
+# --- JAPANESE (Sales & Parking) ---
+このドメインは販売中です
+ドメインの購入
+ドメインパーキング
+販売用ドメイン
+所有者に連絡する
+このドメインは売り出し中です
+# --- ITALIAN (Vendita & Parcheggio) ---
+dominio in vendita
+compra questo dominio
+dominio parcheggiato
+questo dominio è in vendita
+contatta il proprietario
+# --- DUTCH (Verkoop & Parkeren) ---
+domeinnaam te koop
+koop dit domein
+domein geparkeerd
+deze domeinnaam is te koop
+neem contact op met de eigenaar
+# --- PORTUGUESE (Venda & Estacionamento) ---
+domínio à venda
+comprar este domínio
+domínio estacionado
+este domínio está à venda
+# --- RUSSIAN (Продажа & Парковка) ---
+домен продается
+купить этот домен
+домен припаркован
+этот домен продается
+связаться с владельцем
+# --- TURKISH (Satılık & Park) ---
+bu alan adı satılıktır
+bu alan adını satın al
+park edilmiş alan adı
+satılık alan adı
+sahibiyle iletişime geçin
+# --- ARABIC (Sales) ---
+هذا النطاق معروض للبيع
+شراء هذا النطاق
+نطاق مركون
+اتصل بمالك النطاق
+# --- HINDI (Sales) ---
+यह डोमेन बिक्री के लिए है
+इस डोमेन को खरीदें
+डोमेन पार्क किया गया है
+# --- KOREAN (Sales) ---
+이 도메인은 판매 중입니다
+이 도메인 구매
+파킹된 도메인
+도메인 판매
+# --- GENERIC COMMON PATTERNS ---
+domainisavailable
+buythisdomain
+getthisdomain
+makemeanoffer
+domainlisting
+namesilo
+godaddy-parking
+domain-parking
+parkingpage
+page not found
+404 not found
+404 error
+error 404
+forbidden 403
+access denied
+# --- WEB CONTROL PANELS ---
+apache2 ubuntu default page
+iis windows server
+welcome to nginx
+nginx default page
+powered by centos
+powered by plesk
+managed by webuzo
+# --- ADDITIONAL DOMAIN FOR SALE SIGNATURES ---
+is for sale
+was found for sale
+domain name for sale
+domain is available
+interested in purchasing
+domain name may be for sale
+this domain may be for sale
+visit dan.com
+visit sedo.com
+visit afternic.com
+# --- PARKING SITES ---
+bodis.com
+parked.com
+parkingcrew.net
+above.com
+parking.com
+# --- SEARCH / ADS LANDING ---
+related searches
+listings related to
+sponsored listings
+sponsored results
+this page is under construction
+site is under construction
+maintenance mode
+offline
+site temporarily offline
+domain not active
+inactive domain
+# --- OTHERS ---
+parked free, courtesy of godaddy
+domain parked with namesilo
+this page is parked free
+domain name is already registered
+renew your domain
+domain expired
+this domain has expired
+expiration notice
+# --- NO CONTENT / PLACEHOLDERS ---
+lorem ipsum
+placeholder content
+just another wordpress site
+my wordpress blog
+test page
+it works!
+hello world!
