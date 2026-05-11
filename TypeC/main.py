@@ -109,6 +109,9 @@ async def save_snapshot(domain: str, html: str, reason: str):
 
 from urllib.parse import urlparse
 
+# Global semaphore to limit total parallel browser contexts to prevent CPU spikes
+BROWSER_SEMAPHORE = asyncio.Semaphore(CONFIG.get("MAX_CONCURRENT_BROWSERS", 3))
+
 async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
     scrap_logger.info(f"FETCH START: {url}")
     
