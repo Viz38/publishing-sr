@@ -221,6 +221,8 @@ create_runner() {
 export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 cd "$f_path"
+echo "--- Runner Started: \$(date) ---" >> "$f_path/Logs/api.logs"
+echo "User: \$(whoami) | Python: \$("$f_path/.venv/bin/python" --version) | CWD: \$(pwd)" >> "$f_path/Logs/api.logs"
 exec "$f_path/.venv/bin/uvicorn" api:app --host 0.0.0.0 --port $f_port --log-level info
 EOF
     chmod 755 "$runner"
