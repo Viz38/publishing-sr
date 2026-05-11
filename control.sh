@@ -78,10 +78,11 @@ check_port() {
         lsof -Pi :$port -sTCP:LISTEN -t >/dev/null
         return $?
     elif command -v ss &>/dev/null; then
-        ss -ltn | grep -q ":$port "
+        # More robust grep for Linux ss output
+        ss -ltn | grep -E ":$port |:$port$" >/dev/null
         return $?
     else
-        netstat -ltn | grep -q ":$port "
+        netstat -ltn | grep -E ":$port |:$port$" >/dev/null
         return $?
     fi
 }
@@ -348,6 +349,13 @@ while true; do
                 echo -e "${BLUE}Initializing $f...${NC}"
                 mkdir -p "$f/Logs"
                 [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
+                if [[ "$OS" == "Linux" ]]; then
+                    echo -e "${BLUE}🐧 Installing Linux-specific browser dependencies...${NC}"
+                    "$f/.venv/bin/python" -m playwright install-deps 2>/dev/null
+                    "$f/.venv/bin/python" -m playwright install firefox 2>/dev/null
+                else
+                    "$f/.venv/bin/python" -m playwright install firefox 2>/dev/null
+                fi
                 "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet
             done
             read -p "Init Done. Enter...";;

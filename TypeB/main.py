@@ -138,8 +138,9 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
     try:
         from scrapling import Fetcher
         scrap_logger.info(f"TIER 1: Scrapling Request Fetch for {url}")
+        Fetcher.configure(timeout=60, verify=False)
         s_fetcher = Fetcher()
-        s_resp = s_fetcher.get(url, timeout=60, verify=False)
+        s_resp = s_fetcher.get(url)
         
         if s_resp.status == 200:
             content = s_resp.text
@@ -188,8 +189,9 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
     try:
         from scrapling import StealthyFetcher
         scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
-        sf = StealthyFetcher(headless=True)
-        s_resp = await sf.async_fetch(url, timeout=60, verify=False)
+        StealthyFetcher.configure(headless=True, timeout=60, verify=False)
+        sf = StealthyFetcher()
+        s_resp = await sf.async_fetch(url)
         
         if s_resp.status == 200:
             content = s_resp.text
