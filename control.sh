@@ -100,8 +100,9 @@ get_python() {
 }
 # Load environment variables from .env
 if [ -f ".env" ]; then
-    # Improved .env loading to handle spaces and quotes
-    export $(grep -v '^#' .env | xargs -0 2>/dev/null || grep -v '^#' .env | xargs)
+    set -a
+    source .env
+    set +a
 fi
 
 PYTHON_CMD=$(get_python)
@@ -307,7 +308,7 @@ cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
+"./.venv/bin/python" -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     sudo chown $REAL_USER:$REAL_USER "$runner"
     sudo chmod +x "$runner"
@@ -408,12 +409,12 @@ After=network.target
 [Service]
 Type=simple
 User=$REAL_USER
-WorkingDirectory=$f_path
-ExecStart=$f_runner
+WorkingDirectory=\"$f_path\"
+ExecStart=\"$f_runner\"
 Restart=always
 RestartSec=5
-StandardOutput=append:$f_path/Logs/api.logs
-StandardError=append:$f_path/Logs/api.logs
+StandardOutput=append:\"$f_path/Logs/api.logs\"
+StandardError=append:\"$f_path/Logs/api.logs\"
 [Install]
 WantedBy=multi-user.target
 EOF"
