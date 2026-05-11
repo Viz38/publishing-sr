@@ -214,8 +214,12 @@ create_runner() {
     local f_path=$1
     local f_port=$2
     local f_label=$3
-    # Ensure the user owns their folders
+    # Robust permission fix: Reset Logs directory
+    sudo mkdir -p "$f_path/Logs"
+    sudo rm -f "$f_path/Logs/api.logs"
+    sudo touch "$f_path/Logs/api.logs"
     sudo chown -R $REAL_USER:$REAL_USER "$f_path"
+    sudo chmod -R 775 "$f_path/Logs"
     
     cat <<EOF > "$runner"
 #!/bin/bash

@@ -15,11 +15,18 @@ from sr_common.config import settings
 # Configure logging
 LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Logs')
 os.makedirs(LOGS_DIR, exist_ok=True)
+api_log_path = os.path.join(LOGS_DIR, 'api.logs')
+
+# Ensure we can write to the log file
+if not os.path.exists(api_log_path):
+    with open(api_log_path, 'w') as f: pass
+os.chmod(api_log_path, 0o666)
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOGS_DIR, 'api.logs'), mode="a"),
+        logging.FileHandler(api_log_path, mode="a"),
         logging.StreamHandler()
     ]
 )
@@ -29,31 +36,18 @@ app = FastAPI(title="SR Publishing Type A API")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    # Capture Request Body
+    # Capture Request Body safely
     body = await request.body()
+    # Reset receive to allow app to read body again
     async def receive():
         return {"type": "http.request", "body": body}
-    request._receive = receive
-
+    
     client_ip = request.headers.get("x-forwarded-for") or request.client.host
-    logger.info(f"REQ FROM {client_ip}: {request.method} {request.url.path} | Headers: {dict(request.headers)} | Body: {body.decode()[:2000]}")
+    logger.info(f"REQ FROM {client_ip}: {request.method} {request.url.path} | Body: {body.decode()[:500]}")
     
-    response = await call_next(request)
-    
-    # Capture Response Body
-    from fastapi.responses import Response as FastApiResponse
-    res_body = b""
-    async for chunk in response.body_iterator:
-        res_body += chunk
-    
-    logger.info(f"RES TO {client_ip}: {response.status_code} | Body: {res_body.decode()[:2000]}")
-    
-    return FastApiResponse(
-        content=res_body,
-        status_code=response.status_code,
-        headers=dict(response.headers),
-        media_type=response.media_type
-    )
+    # We pass the modified request (with reset receive)
+    response = await call_next(Request(request.scope, receive=receive))
+    return response
 
 app.add_middleware(
     CORSMiddleware,
