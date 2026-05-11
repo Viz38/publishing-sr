@@ -404,9 +404,9 @@ while true; do
                 if [[ "$OS" == "Linux" ]]; then
                     echo -e "${BLUE}🐧 Installing Linux-specific browser dependencies...${NC}"
                     "$f/.venv/bin/python" -m playwright install-deps 2>/dev/null
-                    "$f/.venv/bin/python" -m playwright install firefox 2>/dev/null
+                    "$f/.venv/bin/python" -m playwright install firefox chromium 2>/dev/null
                 else
-                    "$f/.venv/bin/python" -m playwright install firefox 2>/dev/null
+                    "$f/.venv/bin/python" -m playwright install firefox chromium 2>/dev/null
                 fi
                 "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet
             done

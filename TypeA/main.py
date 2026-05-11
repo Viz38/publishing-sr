@@ -140,7 +140,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
         from scrapling import Fetcher
         scrap_logger.info(f"TIER 1: Scrapling Request Fetch for {url}")
         # NEW: use configure() to avoid deprecation warnings
-        Fetcher.configure(timeout=60, verify=False)
+        
         s_fetcher = Fetcher()
         s_resp = s_fetcher.get(url)
         
