@@ -214,7 +214,8 @@ create_runner() {
     local f_path=$1
     local f_port=$2
     local f_label=$3
-    local runner="$f_path/runner.sh"
+    # Ensure the user owns their folders
+    sudo chown -R $REAL_USER:$REAL_USER "$f_path"
     
     cat <<EOF > "$runner"
 #!/bin/bash
@@ -222,8 +223,11 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 cd "$f_path"
 echo "--- Runner Started: \$(date) ---" >> "$f_path/Logs/api.logs"
-echo "User: \$(whoami) | Python: \$("$f_path/.venv/bin/python" --version) | CWD: \$(pwd)" >> "$f_path/Logs/api.logs"
-exec "$f_path/.venv/bin/uvicorn" api:app --host 0.0.0.0 --port $f_port --log-level info
+if [ ! -f "$f_path/.venv/bin/uvicorn" ]; then
+    echo "❌ ERROR: uvicorn not found in .venv" >> "$f_path/Logs/api.logs"
+    exit 1
+fi
+exec "$f_path/.venv/bin/uvicorn" api:app --host 0.0.0.0 --port $f_port --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     chmod 755 "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
