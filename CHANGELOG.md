@@ -10,6 +10,7 @@ Major overhaul of the parked domain detection engine to reduce false positives:
 - **False Positive Blacklist**: Explicitly blacklisted high-risk generic terms like "registrar", "hosting", and "related searches" from triggering parked status unless accompanied by stronger technical signals.
 Related tests:
 - Verified against 8 test scenarios covering false positives (legitimate business text) and true parked signatures.
+- **Production Validation**: Successfully verified 6 specific false-positive domains (`cotesa.com.es`, `hocloop.eu`, `agwelldrilling.com`, `njmcdirect.shop`, `bolma.ng`, `alltagskompetenzen.bayern`) which now all correctly pass as CLEAN.
 
 ## [2026-05-12] Critical Bug Fix: Deadlock & Timeout Resolution (v6.9)
 Files changed:
