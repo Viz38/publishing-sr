@@ -140,11 +140,13 @@ async def get_status():
     return {
         "status": state["status"],
         "active": state["status"] == "running",
-        "progress_current": state["progress"].get("current", 0),
-        "progress_total": state["progress"].get("total", 0),
-        "progress_success": state["progress"].get("success", 0),
-        "progress_fail": state["progress"].get("fail", 0),
-        "workerName": f"{os.environ.get('WORKER_IDENTITY', 'Unknown')}-TypeA-Pipeline"
+        "progress": {
+            "current": state["progress"].get("current", 0),
+            "total": state["progress"].get("total", 0),
+            "success": state["progress"].get("success", 0),
+            "fail": state["progress"].get("fail", 0)
+        },
+        "workerName": f"{os.environ.get('WORKER_IDENTITY', os.uname().nodename)}-TypeA-Pipeline"
     }
 
 @app.get("/typea/health", dependencies=[Depends(verify_token)])

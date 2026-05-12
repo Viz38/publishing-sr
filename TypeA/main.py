@@ -425,6 +425,9 @@ class TypeAPipeline:
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map):
         monitor = SystemHealthMonitor()
+        import random
+        # Jitter start to prevent CPU storm
+        await asyncio.sleep(random.uniform(5.0, 20.0))
         while True:
             idx, row = await w_q.get()
             try:

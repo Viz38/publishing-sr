@@ -349,7 +349,7 @@ class TypeCPipeline:
         monitor = SystemHealthMonitor()
         import random
         # Jitter start to prevent CPU storm
-        await asyncio.sleep(random.uniform(1.0, 5.0))
+        await asyncio.sleep(random.uniform(5.0, 20.0))
         while True:
             idx, row = await w_q.get()
             try:

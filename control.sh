@@ -101,8 +101,11 @@ get_python() {
 }
 # Load environment variables from .env
 if [ -f ".env" ]; then
-    # Improved .env loading to handle spaces and quotes
-    export $(grep -v '^#' .env | xargs -0 2>/dev/null || grep -v '^#' .env | xargs)
+    while IFS= read -r line || [ -n "$line" ]; do
+        [[ "$line" =~ ^#.*$ ]] && continue
+        [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+        export "$line"
+    done < ".env"
 fi
 
 PYTHON_CMD=$(get_python)
