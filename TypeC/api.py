@@ -136,10 +136,12 @@ async def get_status():
     return {
         "status": state["status"],
         "active": state["status"] == "running",
-        "progress_current": state["progress"].get("current", 0),
-        "progress_total": state["progress"].get("total", 0),
-        "progress_success": state["progress"].get("success", 0),
-        "progress_fail": state["progress"].get("fail", 0),
+        "progress": {
+            "current": state["progress"].get("current", 0),
+            "total": state["progress"].get("total", 0),
+            "success": state["progress"].get("success", 0),
+            "fail": state["progress"].get("fail", 0)
+        },
         "workerName": "Vishnu-TypeC-Pipeline"
     }
 
@@ -170,4 +172,5 @@ async def cancel_pipeline():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8766)
+    port = int(os.environ.get("PORT", 8766))
+    uvicorn.run(app, host="0.0.0.0", port=port)
