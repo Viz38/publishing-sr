@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     MAX_RETRIES: int = 10
     RETRY_DELAY: int = 5
     CONFIGURED_MAX_WORKERS: int = 15
+    CONFIGURED_MIN_WORKERS: int = 1
     
     # Service Auth
     SERVICE_AUTH_TOKEN: str = ""

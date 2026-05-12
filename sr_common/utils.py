@@ -240,11 +240,13 @@ def get_dynamic_max_workers(ram_per_worker_gb: float = 0.2) -> int:
     Calculates the maximum number of concurrent workers based on AVAILABLE system resources.
     Assumes ~200MB per worker (more realistic for browser-heavy tasks).
     User can configure the max via CONFIGURED_MAX_WORKERS, but this function enforces the safe limit.
+    It will also respect CONFIGURED_MIN_WORKERS.
     """
     import psutil
     from .config import settings
     
     configured_max = getattr(settings, "CONFIGURED_MAX_WORKERS", 15)
+    configured_min = getattr(settings, "CONFIGURED_MIN_WORKERS", 1)
     cores = psutil.cpu_count(logical=False) or 2
     available_mem_gb = psutil.virtual_memory().available / (1024**3)
     
@@ -257,5 +259,6 @@ def get_dynamic_max_workers(ram_per_worker_gb: float = 0.2) -> int:
     # Safe limit is the lowest of CPU or RAM capacity
     safe_limit = max(1, min(cpu_limit, ram_limit))
     
-    # Return user's configured max, but never exceed the safe limit
-    return min(configured_max, safe_limit)
+    # Apply configurations
+    calculated_limit = min(configured_max, safe_limit)
+    return max(configured_min, calculated_limit)
