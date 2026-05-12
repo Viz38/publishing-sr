@@ -158,7 +158,9 @@ async def start_pipeline(req: RunRequest, background_tasks: BackgroundTasks):
     return {"status": "accepted"}
 
 @app.post("/typec/cancel", dependencies=[Depends(verify_token)])
-async def cancel_pipeline():
+async def cancel_pipeline(request: Request):
+    headers = dict(request.headers)
+    logger.info(f"CANCEL REQUEST RECEIVED. Headers: {headers}")
     if state["active_pid"]:
         try:
             import signal
