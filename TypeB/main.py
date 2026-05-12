@@ -206,7 +206,11 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
             from scrapling import StealthyFetcher
             scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
             # NEW: use async_fetch class method to avoid sync-loop crash
-            s_resp = await StealthyFetcher.async_fetch(url, headless=True, timeout=CONFIG["REQUEST_TIMEOUT"] * 1000)
+            # Wrap in asyncio.wait_for to forcefully break out of scrapling's internal 3-retry 90-second hang
+            s_resp = await asyncio.wait_for(
+                StealthyFetcher.async_fetch(url, headless=True, timeout=CONFIG["REQUEST_TIMEOUT"] * 1000),
+                timeout=35.0
+            )
             
             if s_resp.status == 200:
                 content = s_resp.text
