@@ -7,8 +7,9 @@ Files changed:
 Reason:
 Hardened the engines against mid-run stops caused by bad data or unexpected network errors, introduced configurable concurrency, and removed hardcoded identities.
 Key Fixes:
+- **Accurate Progress Reporting**: Fixed an issue where the UI progress bar advanced as soon as a row was queued. The progress count now only increments after a domain has been completely processed (success or fail).
 - **Dynamic Worker Identity**: Removed the hardcoded `"Vishnu-TypeC-Pipeline"` in the status response. It now dynamically reads `WORKER_IDENTITY` from `control.sh`, reflecting the actual device or user running the script.
-- **Configurable Workers**: Users can now set `CONFIGURED_MAX_WORKERS=X` in the `.env` file to control concurrency.
+- **Configurable Workers**: Users can now set `CONFIGURED_MAX_WORKERS=X` and `CONFIGURED_MIN_WORKERS=Y` in the `.env` file to control concurrency.
 - **Safe Scaling**: The dynamic worker logic now guarantees the engine will never exceed the configured workers, while still strictly enforcing the Available-RAM and CPU limits (90% Max CPU/Memory).
 - **Worker Isolation**: Wrapped domain processing in a global `try/except` to ensure one failing row doesn't kill the entire orchestrator.
 - **Data Safety**: Added null-checks for Funnel Names and hashtags to prevent `AttributeError` crashes.

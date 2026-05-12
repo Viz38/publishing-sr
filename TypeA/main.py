@@ -489,8 +489,11 @@ class TypeAPipeline:
                     logging.error(f"Error while calling batch_update: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
-                    self.report_progress(len(processed), total, s, f)
-            else: self.report_progress(len(processed), total, s, f)
+                    current_completed = s + f
+                    self.report_progress(current_completed, total, s, f)
+            else: 
+                current_completed = s + f
+                self.report_progress(current_completed, total, s, f)
             await asyncio.sleep(1)
 
     def report_progress(self, curr, total, s, f):

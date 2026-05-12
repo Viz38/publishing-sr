@@ -411,9 +411,12 @@ class TypeCPipeline:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
-                    self.report_progress(len(processed_indices), total, success_count, fail_count)
-                    pipeline_logger.info(f"PROGRESS: {len(processed_indices)}/{total} | Success: {success_count} | Fail: {fail_count}")
-            else: self.report_progress(len(processed_indices), total, success_count, fail_count)
+                    current_completed = success_count + fail_count
+                    self.report_progress(current_completed, total, success_count, fail_count)
+                    pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success_count} | Fail: {fail_count}")
+            else: 
+                current_completed = success_count + fail_count
+                self.report_progress(current_completed, total, success_count, fail_count)
             await asyncio.sleep(1)
 
     def report_progress(self, curr, total, success, fail):
