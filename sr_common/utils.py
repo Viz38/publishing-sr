@@ -34,28 +34,12 @@ class SystemHealthMonitor:
             return False, f"Memory too high ({mem}%)"
         return True, "Healthy"
 
-    async def is_network_healthy(self) -> bool:
-        """Checks if DNS resolution is working."""
-        import socket
-        import asyncio
-        try:
-            # Try to resolve a reliable host
-            loop = asyncio.get_event_loop()
-            await loop.getaddrinfo("google.com", 443, family=socket.AF_INET)
-            return True
-        except:
-            return False
-
     async def wait_for_resources(self, logger=None):
         """Pauses execution if system resources are saturated."""
         while True:
             healthy, reason = self.is_healthy()
             if healthy:
-                # Extra check: Is the network actually up?
-                if await self.is_network_healthy():
-                    break
-                else:
-                    reason = "Network/DNS failure"
+                break
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
