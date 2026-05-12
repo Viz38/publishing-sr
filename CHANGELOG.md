@@ -1,11 +1,10 @@
-## [2026-05-12] Tracxn API: Include Company Name in Domain Profile Update
+## [2026-05-12] Tracxn API: Include Company Name in Domain Profile Update (Type C Only)
 Files changed:
-- TypeB/main.py
 - TypeC/main.py
 Reason:
-Ensured that the company name from the sheet is written to the Tracxn `domain-profile` entity during the automated publishing process.
+Ensured that the company name from the sheet is written to the Tracxn `domain-profile` entity during the automated publishing process for Type C.
 Key Fixes:
-- **API Payload Update**: Added the `companyName` field to the `domain-profile` PUT request payload in both Type B and Type C pipelines.
+- **API Payload Update**: Added the `companyName` field to the `domain-profile` PUT request payload in the Type C pipeline.
 
 ## [2026-05-12] Fetch Hardening: Minimum Content Length & Stricter Validation
 Files changed:
