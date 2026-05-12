@@ -424,8 +424,10 @@ class TypeBPipeline:
                         await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
-                pipeline_logger.error(f"PIPELINE EXC: {str(e)}")
-            finally: w_q.task_done()
+                pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
+                await r_q.put({'type': 'progress', 'is_success': False})
+            finally:
+                w_q.task_done()
 
     async def sheet_writer(self, r_q, ws, total):
         processed_indices, success, fail = set(), 0, 0

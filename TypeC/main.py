@@ -356,7 +356,7 @@ class TypeCPipeline:
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
                         tags = res["tags"] + ["bu_llm_typec_autopublish"]
-                        funnel_name = res["funnel_name"]
+                        funnel_name = res.get("funnel_name") or ""
                         feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
                         feed_id = f_ids.get(feed, "")
                         
@@ -385,8 +385,10 @@ class TypeCPipeline:
                         await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
-                pipeline_logger.error(f"PIPELINE EXC: {str(e)}")
-            finally: w_q.task_done()
+                pipeline_logger.error(f"FATAL WORKER ERROR for {row[h_map['domain']] if row else 'Unknown'}: {e}")
+                await r_q.put({'type': 'progress', 'is_success': False})
+            finally:
+                w_q.task_done()
 
     async def sheet_writer(self, r_q, ws, total):
         processed_indices, success_count, fail_count = set(), 0, 0

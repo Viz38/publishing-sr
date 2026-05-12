@@ -448,19 +448,14 @@ class TypeAPipeline:
                         s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         
-                        bm_up, fun_up = "N/A", "N/A"
-                        f_name = row[h_map["feed"]]
-                        f_id = res["feed_id"] or f_ids.get(res["bm_name"]) or f_ids.get(f_name)
-                        if edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts") and res["bm_id"] != "No ID":
-                            if f_id:
-                                s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
-                                bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
-                                
-                                if bm_up in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts"):
-                                    ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                                    fun_up = "Done" if ms in (200, 201) else ("Duplicate/Already Moved" if ms == 422 else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                        await r_q.put({'range': f"T{idx}:W{idx}", 'values': [[f_id, edits, bm_up, fun_up]]})
-                        await r_q.put({'type': 'progress', 'is_success': (edits == "Done")})
+                        f_id = res["feed_id"]
+                        s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
+                        bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                        
+                        ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                        fun = "Done" if ms in (200, 201) else ("Duplicate/Already Moved" if ms == 422 else ("Funnel State Conflicts" if ms == 400 else "Err"))
+                        await r_q.put({'range': f"U{idx}:W{idx}", 'values': [[edits, bm_up, fun]]})
+                        await r_q.put({'type': 'progress', 'is_success': edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
                     reason = res.get('reason', 'Failed')
@@ -469,7 +464,8 @@ class TypeAPipeline:
                         await r_q.put({'range': f"I{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
-                pipeline_logger.error(f"PIPELINE EXC: {str(e)}")
+                pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
+                await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()
 
     async def sheet_writer(self, r_q, ws, total):
