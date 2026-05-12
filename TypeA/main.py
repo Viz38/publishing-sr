@@ -28,8 +28,8 @@ CONFIG = {
     "FEED_DEF_SHEET_ID_2": settings.FEED_DEF_SHEET_ID_2,
     "EXTRACTING_SHEET_NAME": "DB",
     "CREDENTIALS_FILE": os.path.join(os.path.dirname(os.path.abspath(__file__)), "TypeA.json"),
-    "MAX_WORKERS": 3,
-    "MAX_CONCURRENT_BROWSERS": 3,
+    "MAX_WORKERS": min(psutil.cpu_count(logical=False) or 4, 5),
+    "MAX_CONCURRENT_BROWSERS": min(psutil.cpu_count(logical=False) or 4, 5),
     "GEMINI_API_URL": settings.GEMINI_API_URL,
     "GEMINI_API_KEY": settings.TYPEA_GEMINI_API_KEY,
     "MAX_PROMPT_SIZE": settings.MAX_PROMPT_SIZE,
@@ -165,7 +165,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
             
             # EXPLICIT MEDIA BLOCKING
             async def block_media(route):
-                if route.request.resource_type in ["image", "media", "font"]:
+                if route.request.resource_type in ["image", "media", "font", "object", "texttrack", "manifest", "other"]:
                     await route.abort()
                 else:
                     await route.continue_()
@@ -214,7 +214,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
 
 def extract_links(html: str, base_url: str) -> Set[str]:
     if not html: return set()
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html, 'lxml')
     links = set()
     domain = urlparse(base_url).netloc
     for a in soup.find_all('a', href=True):

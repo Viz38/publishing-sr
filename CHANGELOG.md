@@ -12,6 +12,23 @@ Related tests:
 - Verified against 8 test scenarios covering false positives (legitimate business text) and true parked signatures.
 - **Production Validation**: Successfully verified 6 specific false-positive domains (`cotesa.com.es`, `hocloop.eu`, `agwelldrilling.com`, `njmcdirect.shop`, `bolma.ng`, `alltagskompetenzen.bayern`) which now all correctly pass as CLEAN.
 
+## [2026-05-12] Performance & Resource Optimization
+Files changed:
+- sr_common/utils.py
+- sr_common/config.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Implement high-performance parsing and dynamic resource scaling.
+Key Upgrades:
+- Migrated HTML parsing from `html.parser` to `lxml` for 30%+ speedup.
+- Hardened resource blocking in Playwright (added fonts, objects, manifests) while preserving CSS.
+- Implemented dynamic worker/browser scaling based on physical CPU cores.
+- Optimized Google Sheets batching (increased from 5 to 10).
+Related tests:
+scratch/test_parsing.py
+
 ## [2026-05-12] Critical Bug Fix: Deadlock & Timeout Resolution (v6.9)
 Files changed:
 - Type*/api.py

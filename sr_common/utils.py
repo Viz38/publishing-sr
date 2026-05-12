@@ -152,7 +152,7 @@ async def call_tracxn_api(session: aiohttp.ClientSession, url: str, limiter, met
 def clean_html(html: str) -> str:
     if not html: return ""
     from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, 'html.parser')
+    soup = BeautifulSoup(html, 'lxml')
     for s in soup(['script', 'style', 'nav', 'footer', 'header']):
         s.decompose()
     return " ".join(soup.get_text(separator=' ').split())
