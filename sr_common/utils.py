@@ -126,32 +126,51 @@ def is_parked_domain(html: str, text: str) -> Tuple[bool, str]:
     return False, ""
 
 async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter) -> LLMResult:
+    import random
     if not prompt or prompt == "noData":
         return LLMResult(text="Error", success=False)
     
-    await limiter.throttle()
     url = f"{settings.GEMINI_API_URL}?key={settings.TYPEA_GEMINI_API_KEY}"
+    max_retries = 3
     
-    logging.debug(f"GEMINI REQ: Sending prompt (Size: {len(prompt)})")
-    try:
-        async with session.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=settings.REQUEST_TIMEOUT) as response:
-            res = await response.json()
-            if response.status != 200:
-                logging.error(f"GEMINI ERR {response.status}: {res}")
-                return LLMResult(text="Error", success=False)
-            
-            text = res['candidates'][0]['content']['parts'][0]['text']
-            usage = res.get("usageMetadata", {})
-            logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)})")
-            return LLMResult(
-                text=text,
-                prompt_tokens=usage.get("promptTokenCount", 0),
-                candidate_tokens=usage.get("candidatesTokenCount", 0),
-                success=True
-            )
-    except Exception as e:
-        logging.error(f"GEMINI EXC: {str(e)}")
-        return LLMResult(text="Error", success=False)
+    for attempt in range(max_retries):
+        await limiter.throttle()
+        logging.debug(f"GEMINI REQ: Sending prompt (Size: {len(prompt)}) | Attempt: {attempt + 1}")
+        try:
+            timeout = aiohttp.ClientTimeout(total=60)
+            async with session.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=timeout) as response:
+                res = await response.json()
+                
+                if response.status == 429:
+                    base_delay = 2 ** (attempt + 1)
+                    jitter = random.uniform(0, base_delay)
+                    wait_time = base_delay + jitter
+                    logging.warning(f"GEMINI 429: Rate limited. Backing off {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                    continue
+                
+                if response.status != 200:
+                    logging.error(f"GEMINI ERR {response.status}: {res}")
+                    return LLMResult(text="Error", success=False)
+                
+                text = res['candidates'][0]['content']['parts'][0]['text']
+                usage = res.get("usageMetadata", {})
+                logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)})")
+                return LLMResult(
+                    text=text,
+                    prompt_tokens=usage.get("promptTokenCount", 0),
+                    candidate_tokens=usage.get("candidatesTokenCount", 0),
+                    success=True
+                )
+        except Exception as e:
+            logging.error(f"GEMINI EXC: {str(e)} | Attempt: {attempt + 1}/{max_retries}")
+            if attempt < max_retries - 1:
+                await asyncio.sleep(2 ** (attempt + 1))
+                continue
+            return LLMResult(text="Error", success=False)
+    
+    logging.error("GEMINI FAIL: Exhausted all retries after 429 rate limiting")
+    return LLMResult(text="Error", success=False)
 
 async def call_tracxn_api(session: aiohttp.ClientSession, url: str, limiter, method: str = "put", json_data: Optional[Dict] = None, headers: Optional[Dict] = None) -> Tuple[int, Optional[Dict]]:
     attempt = 0

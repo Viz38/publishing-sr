@@ -1,3 +1,20 @@
+## [2026-05-12] Resilience Hardening: LLM Retry, Timeouts & Proxy Recovery
+Files changed:
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Address production failures observed in api.logs (GEMINI ERR 429, GEMINI EXC, curl timeouts, Proxy None failures).
+Key Fixes:
+- **Gemini 429 Retry**: `call_gemini_api` now retries up to 3 times with jittered exponential backoff (2-6s, 4-12s, 8-24s) on rate-limit errors.
+- **Gemini Timeout**: LLM calls now use a dedicated 60s `aiohttp.ClientTimeout` to prevent empty exception failures on large prompts.
+- **HTTPX Timeout**: Tier 0 fetch timeout increased from 30s to 45s for slow-responding sites.
+- **Browser Timeout**: Camoufox `page.goto` timeout increased from 60s to 90s to accommodate heavy DOM sites.
+- **Proxy Recovery**: Tier 2 (Camoufox) now retries once on proxy initialization failures before falling through to Tier 3.
+Related tests:
+- py_compile validation across all engines.
+
 ## [2026-05-12] Improved Parked Domain Detection & False Positive Reduction
 Files changed:
 - sr_common/utils.py

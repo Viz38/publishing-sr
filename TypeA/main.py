@@ -124,7 +124,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
     try:
         import httpx
         scrap_logger.info(f"TIER 0: Basic HTTPX Fetch for {url}")
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=30) as client:
+        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=45) as client:
             h_resp = await client.get(url, headers=MAIN_HEADERS)
             if h_resp.status_code == 200:
                 content = h_resp.text
@@ -158,38 +158,45 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
         scrap_logger.warning(f"TIER 1 ERR: {url} | {str(e)}")
 
     # --- TIER 2: CAMOUFOX (Full Browser) ---
-    context = None
-    try:
-        async with BROWSER_SEMAPHORE:
-            scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url}")
-            context = await browser.new_context(ignore_https_errors=True)
-            page = await context.new_page()
-            
-            # EXPLICIT MEDIA BLOCKING
-            async def block_media(route):
-                if route.request.resource_type in ["image", "media", "font", "object", "texttrack", "manifest", "other"]:
-                    await route.abort()
+    for camoufox_attempt in range(2):
+        context = None
+        try:
+            async with BROWSER_SEMAPHORE:
+                scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url} (attempt {camoufox_attempt + 1})")
+                context = await browser.new_context(ignore_https_errors=True)
+                page = await context.new_page()
+                
+                # EXPLICIT MEDIA BLOCKING
+                async def block_media(route):
+                    if route.request.resource_type in ["image", "media", "font", "object", "texttrack", "manifest", "other"]:
+                        await route.abort()
+                    else:
+                        await route.continue_()
+                
+                await page.route("**/*", block_media)
+                
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                
+                if response and response.status == 200:
+                    await asyncio.sleep(5)
+                    content = await page.content()
+                    if "sgcaptcha" not in content.lower() and len(content) > 500:
+                        scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
+                        return content, 200, "Success"
+                    scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
                 else:
-                    await route.continue_()
-            
-            await page.route("**/*", block_media)
-            
-            response = await page.goto(url, wait_until="domcontentloaded", timeout=60000)
-            
-            if response and response.status == 200:
-                await asyncio.sleep(5)
-                content = await page.content()
-                if "sgcaptcha" not in content.lower() and len(content) > 500:
-                    scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
-                    return content, 200, "Success"
-                scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
-            else:
-                scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
-    except Exception as e:
-        scrap_logger.warning(f"TIER 2 ERR: {url} | {str(e)}")
-    finally:
-        if context:
-            await context.close()
+                    scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
+                break
+        except Exception as e:
+            err_msg = str(e)
+            scrap_logger.warning(f"TIER 2 ERR: {url} | {err_msg} (attempt {camoufox_attempt + 1})")
+            if "Proxy" in err_msg and camoufox_attempt == 0:
+                scrap_logger.info(f"TIER 2 RETRY: Proxy failure, retrying once for {url}")
+                await asyncio.sleep(2)
+                continue
+        finally:
+            if context:
+                await context.close()
 
     # --- TIER 3: SCRAPLING STEALTH (Playwright-backed Stealth) ---
     try:
