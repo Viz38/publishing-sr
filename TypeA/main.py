@@ -401,16 +401,27 @@ class TypeAPipeline:
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
-                async with AsyncCamoufox(
-                    headless=True,
-                    humanize=True,
-                    block_webrtc=True,
-                    os="windows",
-                    i_know_what_im_doing=True
-                ) as browser:
-                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
-                    writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
-                    await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
+                while True:
+                    try:
+                        await SystemHealthMonitor(cpu_threshold=90, mem_threshold=90).wait_for_resources(logger=pipeline_logger)
+                        async with AsyncCamoufox(
+                            headless=True,
+                            humanize=True,
+                            block_webrtc=True,
+                            os="windows",
+                            i_know_what_im_doing=True
+                        ) as browser:
+                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
+                            await work_queue.join()
+                            [t.cancel() for t in tasks]
+                            await result_queue.join()
+                            writer_task.cancel()
+                            break
+                    except Exception as e:
+                        pipeline_logger.error(f"BROWSER ENGINE CRASHED: {e}. Restarting...")
+                        await asyncio.sleep(10)
+                        await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map):
         monitor = SystemHealthMonitor()
