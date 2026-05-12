@@ -238,9 +238,12 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
     
     html, _, reason = await fetch_page(browser, f"https://{domain}")
-    if not html or len(html) < 300: 
+    if html is None:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-        return {"type": "error", "reason": reason if html else "Low Content"}
+        return {"type": "error", "reason": reason}
+    if len(html) < 300:
+        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+        return {"type": "error", "reason": "Low Content"}
     
     home_text = clean_html(html)
     parked, kw = is_parked_domain(html, home_text)

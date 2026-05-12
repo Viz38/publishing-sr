@@ -1,3 +1,14 @@
+## [2026-05-12] Error Reporting: Distinguish between Fetch Failures and Low Content
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Resolved a logic bug where actual fetch errors (e.g., DNS failures, Timeouts) were being masked by a generic "Low Content" status in the Google Sheets.
+Key Fixes:
+- **Refined Validation**: Separated `html is None` (fetch failure) from `len(html) < 300` (low content) to ensure the sheet correctly reflects why a domain failed.
+- **Log Precision**: Added character counts to "Low Content" logs for better diagnostic visibility.
+
 ## [2026-05-12] API Stability: Fix 'NoneType' Decode Crash in Background Task
 Files changed:
 - TypeA/api.py

@@ -227,9 +227,12 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     pipeline_logger.info(f"PROCESS START: {domain}")
     
     html, _, reason = await fetch_page(browser, f"https://{domain}")
-    if not html or len(html) < 300: 
+    if html is None:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-        return {"type": "error", "reason": reason if html else "Low Content"}
+        return {"type": "error", "reason": reason}
+    if len(html) < 300:
+        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+        return {"type": "error", "reason": "Low Content"}
         
     body = clean_html(html)
     pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
