@@ -1,3 +1,15 @@
+## [2026-05-12] Fix: "Success" False Positives & Scraping Validation
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Address 23+ cases where domains were marked as "Success" without LLM processing due to empty/tiny content returning from Tier 3 scrapers.
+Key Fixes:
+- **Tier 3 Length Validation**: Enforced a minimum of 300 characters for Tier 3 (Stealth) fetches before allowing a "Success" state.
+- **Stricter Fetch Logic**: Updated `process_domain_stage1` to explicitly check for `html is None` or `len(html) < 200`, preventing falsy empty strings from masquerading as valid fetches.
+- **Improved Error Messaging**: Distinguishes between a genuine fetch failure (None) and insufficient content (<200 chars).
+
 ## [2026-05-12] Resilience Hardening: LLM Retry, Timeouts & Proxy Recovery
 Files changed:
 - sr_common/utils.py

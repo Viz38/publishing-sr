@@ -205,10 +205,11 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
             
             if s_resp.status == 200:
                 content = s_resp.text
-                if "sgcaptcha" not in content.lower():
+                if "sgcaptcha" not in content.lower() and len(content) > 300:
                     scrap_logger.info(f"TIER 3 SUCCESS: {url} | Chars: {len(content)}")
                     return content, 200, "Success"
-                return None, 200, "Captcha Blocked"
+                scrap_logger.warning(f"TIER 3 FAIL: {url} | Reason: Captcha or Low Content")
+                return None, 200, "Low Content/Captcha"
             else:
                 return None, s_resp.status, f"Status {s_resp.status}"
     except Exception as e:
@@ -222,9 +223,9 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) ->
     pipeline_logger.info(f"PROCESS START: {domain}")
     
     html, _, reason = await fetch_page(browser, f"https://{domain}")
-    if not html: 
+    if html is None or len(html) < 200: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-        return {"type": "error", "reason": reason}
+        return {"type": "error", "reason": reason if html is None else "Insufficient Content"}
         
     body = clean_html(html)
     pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
