@@ -93,8 +93,8 @@ async def run_pipeline_task(request: RunRequest):
         
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+            stdout=None,
+            stderr=None,
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
         state["active_pid"] = process.pid

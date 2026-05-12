@@ -1,3 +1,15 @@
+## [2026-05-12] Critical Bug Fix: Deadlock & Timeout Resolution (v6.9)
+Files changed:
+- Type*/api.py
+- Type*/main.py
+Reason:
+Resolve critical issues causing the engine to hang and fail:
+- **Deadlock Fix**: Removed `asyncio.subprocess.PIPE` usage in `api.py` (all types). By setting `stdout=None` and `stderr=None`, we prevent the subprocess from hanging when the OS pipe buffer fills up.
+- **Timeout Correction**: Fixed a typo in Tier 3 (Scrapling Stealth) scraper where `timeout=60` was interpreted as 60ms. It now correctly uses `CONFIG["REQUEST_TIMEOUT"] * 1000` (60,000ms).
+- **Standardized Config**: Updated Type C to use the global `settings.REQUEST_TIMEOUT` for consistency.
+Related tests:
+Manual code verification and log analysis.
+
 ## [2026-05-11] Engine Stability & Resource Hardening (v6.8)
 Files changed:
 - Type*/main.py
