@@ -196,7 +196,11 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
                 await context.close()
 
     # --- TIER 3: SCRAPLING STEALTH ---
+    monitor = SystemHealthMonitor()
     try:
+        # MID-PROCESS CHECK: Wait if CPU is redlining before launching another Playwright process
+        await monitor.wait_for_resources(logger=scrap_logger)
+        
         async with BROWSER_SEMAPHORE:
             from scrapling import StealthyFetcher
             scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
@@ -314,22 +318,31 @@ class TypeCPipeline:
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
-                async with AsyncCamoufox(
-                    headless=True,
-                    humanize=True,
-                    block_webrtc=True,
-                    os="windows",
-                    i_know_what_im_doing=True
-                ) as browser:
-                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
-                    writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
-                    await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
+                try:
+                    async with AsyncCamoufox(
+                        headless=True,
+                        humanize=True,
+                        block_webrtc=True,
+                        os="windows",
+                        i_know_what_im_doing=True
+                    ) as browser:
+                        tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                        writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
+                        await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
+                except Exception as e:
+                    pipeline_logger.critical(f"BROWSER ENGINE CRITICAL ERROR: {e}")
+                    # Allow the script to exit with error status so the API/User knows
+                    raise e
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map):
         monitor = SystemHealthMonitor()
+        import random
+        # Jitter start to prevent CPU storm
+        await asyncio.sleep(random.uniform(1.0, 5.0))
         while True:
             idx, row = await w_q.get()
             try:
+                # Initial resource check before starting a new row
                 await monitor.wait_for_resources(logger=pipeline_logger)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
