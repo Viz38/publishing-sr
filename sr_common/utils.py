@@ -16,7 +16,7 @@ class SystemHealthMonitor:
     Ensures workers only process domains when resources are within safe limits.
     Uses non-blocking cpu_percent(interval=None) to avoid stalling the async event loop.
     """
-    def __init__(self, cpu_threshold: float = 70.0, mem_threshold: float = 90.0):
+    def __init__(self, cpu_threshold: float = 90.0, mem_threshold: float = 90.0):
         self.cpu_threshold = cpu_threshold
         self.mem_threshold = mem_threshold
         import psutil
@@ -235,12 +235,16 @@ def extract_descriptions(text: str) -> Tuple[str, str]:
         
     return " ".join(sd.split()).rstrip('.'), " ".join(ld.split())
 
-def get_dynamic_max_workers(cpu_cap: int = 15, ram_per_worker_gb: float = 0.2) -> int:
+def get_dynamic_max_workers(ram_per_worker_gb: float = 0.2) -> int:
     """
     Calculates the maximum number of concurrent workers based on AVAILABLE system resources.
     Assumes ~200MB per worker (more realistic for browser-heavy tasks).
+    User can configure the max via CONFIGURED_MAX_WORKERS, but this function enforces the safe limit.
     """
     import psutil
+    from .config import settings
+    
+    configured_max = getattr(settings, "CONFIGURED_MAX_WORKERS", 15)
     cores = psutil.cpu_count(logical=False) or 2
     available_mem_gb = psutil.virtual_memory().available / (1024**3)
     
@@ -250,5 +254,8 @@ def get_dynamic_max_workers(cpu_cap: int = 15, ram_per_worker_gb: float = 0.2) -
     # 2. RAM-based scaling (Leave at least 1GB for the OS)
     ram_limit = int(max(0, available_mem_gb - 1.0) / ram_per_worker_gb)
     
-    # Return the most restrictive limit, capped at cpu_cap
-    return max(1, min(cpu_limit, ram_limit, cpu_cap))
+    # Safe limit is the lowest of CPU or RAM capacity
+    safe_limit = max(1, min(cpu_limit, ram_limit))
+    
+    # Return user's configured max, but never exceed the safe limit
+    return min(configured_max, safe_limit)

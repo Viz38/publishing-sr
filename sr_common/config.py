@@ -51,6 +51,7 @@ class Settings(BaseSettings):
     REQUEST_TIMEOUT: int = 90
     MAX_RETRIES: int = 10
     RETRY_DELAY: int = 5
+    CONFIGURED_MAX_WORKERS: int = 15
     
     # Service Auth
     SERVICE_AUTH_TOKEN: str = ""

@@ -2,10 +2,13 @@
 Files changed:
 - TypeA/main.py, TypeB/main.py, TypeC/main.py
 - TypeA/api.py, TypeB/api.py, TypeC/api.py
+- sr_common/config.py, sr_common/utils.py
 - control.sh
 Reason:
-Hardened the engines against mid-run stops caused by bad data or unexpected network errors.
+Hardened the engines against mid-run stops caused by bad data or unexpected network errors, and introduced configurable concurrency.
 Key Fixes:
+- **Configurable Workers**: Users can now set `CONFIGURED_MAX_WORKERS=X` in the `.env` file to control concurrency.
+- **Safe Scaling**: The dynamic worker logic now guarantees the engine will never exceed the configured workers, while still strictly enforcing the Available-RAM and CPU limits (90% Max CPU/Memory).
 - **Worker Isolation**: Wrapped domain processing in a global `try/except` to ensure one failing row doesn't kill the entire orchestrator.
 - **Data Safety**: Added null-checks for Funnel Names and hashtags to prevent `AttributeError` crashes.
 - **Port Restoration**: Reverted ports to original project specifications (8767, 8765, 8766).
