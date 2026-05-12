@@ -284,18 +284,24 @@ class TypeCPipeline:
         # Start system monitoring
         asyncio.create_task(log_system_metrics())
         
-        pipeline_logger.info("Connecting to Google Sheets...")
-        gc = await GoogleSheetsClient.get_manager(self.config["CREDENTIALS_FILE"]).authorize()
-        sheet = await gc.open_by_key(self.config["SHEET_ID"])
-        ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
-        
-        pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-        # Optimize: Only fetch from start_row onwards
-        all_rows = await ws.get_values(f"A{self.start_row}:Z")
-        data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip()]
-        total = len(data_rows)
-        pipeline_logger.info(f"Total rows to process: {total}")
-        self.report_progress(0, total, 0, 0)
+        while True:
+            try:
+                pipeline_logger.info("Connecting to Google Sheets...")
+                gc = await GoogleSheetsClient.get_manager(self.config["CREDENTIALS_FILE"]).authorize()
+                sheet = await gc.open_by_key(self.config["SHEET_ID"])
+                ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
+                
+                pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
+                # Optimize: Only fetch from start_row onwards
+                all_rows = await ws.get_values(f"A{self.start_row}:Z")
+                data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip()]
+                total = len(data_rows)
+                pipeline_logger.info(f"Total rows to process: {total}")
+                self.report_progress(0, total, 0, 0)
+                break
+            except Exception as e:
+                pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
+                await asyncio.sleep(10)
         
         h_map = {
             "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
