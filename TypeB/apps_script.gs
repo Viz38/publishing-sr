@@ -336,11 +336,15 @@ function getStatusJson() {
       headers: { 'Authorization': 'Bearer ' + CONFIG.AUTH_TOKEN },
       muteHttpExceptions: true
     });
+    if (res.getResponseCode() !== 200) {
+        return { active: true, status: 'running', progress_current: 0, progress_total: 0, progress_success: 0, workerName: "Tunnel Reconnecting..." };
+    }
     const s = JSON.parse(res.getContentText());
     s.workerName = PropertiesService.getDocumentProperties().getProperty(CONFIG.ACTIVE_WORKER_PROP + '_NAME');
     return s;
   } catch(e) { 
-    return { active: false, status: 'error' }; 
+    // Ignore temporary network/tunnel drops instead of killing the UI
+    return { active: true, status: 'running', progress_current: 0, progress_total: 0, progress_success: 0, workerName: "Network Blip - Waiting..." }; 
   }
 }
 
