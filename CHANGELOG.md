@@ -1,3 +1,16 @@
+## [2026-05-12] Stability: Implement Worker Isolation & Port Restoration
+Files changed:
+- TypeA/main.py, TypeB/main.py, TypeC/main.py
+- TypeA/api.py, TypeB/api.py, TypeC/api.py
+- control.sh
+Reason:
+Hardened the engines against mid-run stops caused by bad data or unexpected network errors.
+Key Fixes:
+- **Worker Isolation**: Wrapped domain processing in a global `try/except` to ensure one failing row doesn't kill the entire orchestrator.
+- **Data Safety**: Added null-checks for Funnel Names and hashtags to prevent `AttributeError` crashes.
+- **Port Restoration**: Reverted ports to original project specifications (8767, 8765, 8766).
+- **UI Progress Format**: Maintained the nested JSON structure to resolve "undefined" errors in the dashboard.
+
 ## [2026-05-12] Error Reporting: Distinguish between Fetch Failures and Low Content
 Files changed:
 - TypeA/main.py
