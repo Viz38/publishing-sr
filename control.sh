@@ -137,6 +137,7 @@ case "$USER_LOWER" in
         fi
         ;;
 esac
+export WORKER_IDENTITY="$IDENTITY"
 log "INFO" "Session started for $IDENTITY (User: $CURRENT_USER)"
 
 check_port() {

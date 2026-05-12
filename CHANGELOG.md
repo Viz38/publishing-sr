@@ -1,12 +1,13 @@
-## [2026-05-12] Stability: Implement Worker Isolation & Port Restoration
+## [2026-05-12] Stability & Config: Worker Isolation, Safe Scaling, and Dynamic Identity
 Files changed:
 - TypeA/main.py, TypeB/main.py, TypeC/main.py
 - TypeA/api.py, TypeB/api.py, TypeC/api.py
 - sr_common/config.py, sr_common/utils.py
 - control.sh
 Reason:
-Hardened the engines against mid-run stops caused by bad data or unexpected network errors, and introduced configurable concurrency.
+Hardened the engines against mid-run stops caused by bad data or unexpected network errors, introduced configurable concurrency, and removed hardcoded identities.
 Key Fixes:
+- **Dynamic Worker Identity**: Removed the hardcoded `"Vishnu-TypeC-Pipeline"` in the status response. It now dynamically reads `WORKER_IDENTITY` from `control.sh`, reflecting the actual device or user running the script.
 - **Configurable Workers**: Users can now set `CONFIGURED_MAX_WORKERS=X` in the `.env` file to control concurrency.
 - **Safe Scaling**: The dynamic worker logic now guarantees the engine will never exceed the configured workers, while still strictly enforcing the Available-RAM and CPU limits (90% Max CPU/Memory).
 - **Worker Isolation**: Wrapped domain processing in a global `try/except` to ensure one failing row doesn't kill the entire orchestrator.

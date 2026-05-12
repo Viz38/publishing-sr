@@ -143,7 +143,7 @@ async def get_status():
         "progress_total": state["progress"].get("total", 0),
         "progress_success": state["progress"].get("success", 0),
         "progress_fail": state["progress"].get("fail", 0),
-        "workerName": "Vishnu-TypeA-Pipeline"
+        "workerName": f"{os.environ.get('WORKER_IDENTITY', 'Unknown')}-TypeA-Pipeline"
     }
 
 @app.get("/typea/health", dependencies=[Depends(verify_token)])
