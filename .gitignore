@@ -14,3 +14,5 @@ Logs/
 CHANGELOG.md
 GEMINI.md
 docs/
+.DS_Store
+**/.DS_Store
