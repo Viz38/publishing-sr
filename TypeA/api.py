@@ -94,8 +94,8 @@ async def run_pipeline_task(request: RunRequest):
         
         process = await asyncio.create_subprocess_exec(
             *cmd,
-            stdout=None,
-            stderr=None,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             cwd=os.path.dirname(os.path.abspath(__file__))
         )
         state["active_pid"] = process.pid
@@ -115,7 +115,8 @@ async def run_pipeline_task(request: RunRequest):
             logger.info("Type A pipeline completed successfully")
             state["status"] = "succeeded"
         else:
-            logger.error(f"Type A pipeline failed: {stderr.decode()}")
+            err = stderr.decode() if stderr else "Unknown error"
+            logger.error(f"Type A pipeline failed: {err}")
             state["status"] = "failed"
             
     except Exception as e:

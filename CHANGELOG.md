@@ -1,3 +1,14 @@
+## [2026-05-12] API Stability: Fix 'NoneType' Decode Crash in Background Task
+Files changed:
+- TypeA/api.py
+- TypeB/api.py
+- TypeC/api.py
+Reason:
+Resolved a critical bug where the API service would crash if the underlying pipeline failed. The crash was caused by attempting to decode a `None` stderr object.
+Key Fixes:
+- **Subprocess Capture**: Updated `create_subprocess_exec` to properly use `asyncio.subprocess.PIPE` for capturing logs.
+- **Safety Checks**: Added null-checks before decoding `stderr` to ensure the API service remains alive even if the pipeline fails.
+
 ## [2026-05-12] Tracxn API: Include Company Name in Domain Profile Update (Type C Only)
 Files changed:
 - TypeC/main.py
