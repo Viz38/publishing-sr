@@ -1,3 +1,16 @@
+## [2026-05-12] Improved Parked Domain Detection & False Positive Reduction
+Files changed:
+- sr_common/utils.py
+Reason:
+Major overhaul of the parked domain detection engine to reduce false positives:
+- **Heuristic-Based Detection**: Replaced simple substring matching with a tiered confidence system.
+- **Technical Signatures**: Added explicit detection for parking scripts (Sedo, Bodis, ParkingCrew) and meta-refresh redirects to domain marketplaces.
+- **Word Boundary Enforcement**: Implemented regex `\b` matching for all keywords to prevent partial matches (e.g., matching "available" inside "unavailable").
+- **Sparse Content Heuristics**: "Weak" keywords (like "available" or "construction") now only trigger if the page content is extremely sparse (< 400 chars) or if the keyword appears in the `<title>`.
+- **False Positive Blacklist**: Explicitly blacklisted high-risk generic terms like "registrar", "hosting", and "related searches" from triggering parked status unless accompanied by stronger technical signals.
+Related tests:
+- Verified against 8 test scenarios covering false positives (legitimate business text) and true parked signatures.
+
 ## [2026-05-12] Critical Bug Fix: Deadlock & Timeout Resolution (v6.9)
 Files changed:
 - Type*/api.py

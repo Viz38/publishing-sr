@@ -11,12 +11,25 @@ from .models import LLMResult
 logger = logging.getLogger("sr_common.utils")
 
 # Load Parked Domain Dictionary
-PARKED_KEYWORDS = []
+PARKED_KEYWORDS_STRICT = []
+PARKED_KEYWORDS_WEAK = []
+
 try:
     _parked_file = os.path.join(os.path.dirname(__file__), "parked.txt")
     if os.path.exists(_parked_file):
+        # High-risk generic words that cause false positives
+        BLACKlisted_WEAK = ["registrar", "available", "hosting", "server", "offline", "works", "hello world", "test page", "lorem ipsum", "related searches"]
+        
         with open(_parked_file, "r", encoding="utf-8") as f:
-            PARKED_KEYWORDS = [line.strip().lower() for line in f if line.strip() and not line.startswith("#")]
+            for line in f:
+                line = line.strip().lower()
+                if not line or line.startswith("#"): continue
+                
+                # Phrases with 3+ words or specific marketplace markers are usually strict
+                if len(line.split()) >= 3 or any(m in line for m in ["dan.com", "sedo.com", "afternic", "hugedomains", "domainmarket", "parkingcrew", "bodis"]):
+                    PARKED_KEYWORDS_STRICT.append(line)
+                elif line not in BLACKlisted_WEAK:
+                    PARKED_KEYWORDS_WEAK.append(line)
     else:
         logger.warning(f"Parked dictionary missing at {_parked_file}")
 except Exception as e:
@@ -24,25 +37,57 @@ except Exception as e:
 
 def is_parked_domain(html: str, text: str) -> Tuple[bool, str]:
     """
-    Detects if a domain is parked or for sale using the external dictionary
-    and technical signature analysis.
+    Detects if a domain is parked or for sale using tiered heuristics.
     """
-    if not html or not text:
-        return False, ""
+    if not html: return False, ""
     
-    combined = (html + " " + text).lower()
+    html_lower = html.lower()
+    text_lower = text.lower() if text else ""
     
-    # Check dictionary
-    for kw in PARKED_KEYWORDS:
-        if kw in combined:
-            return True, kw
-            
-    # Check for empty titles or technical default patterns
+    # --- 1. TECHNICAL SIGNATURES (Highest Confidence) ---
+    # Specific Parking Meta Refresh
+    if re.search(r'<meta[^>]+http-equiv=["\']refresh["\'][^>]+url=[^>]+(dan\.com|sedo\.com|afternic\.com|hugedomains|bodis|parkingcrew|above\.com|parking\.com)', html_lower):
+        return True, "Technical: Meta-Refresh Redirect"
+        
+    # Specific Parking Script Signatures
+    script_markers = ["parkingcrew.net", "sedoparking.com", "bodis.com", "parking.com", "parklogic.com", "afternic.com/for-sale", "domainnameapi.com"]
+    if any(s in html_lower for s in script_markers):
+        return True, "Technical: Parking Script Signature"
+
+    # Title Patterns
     title_match = re.search(r'<title>(.*?)</title>', html, re.IGNORECASE)
     if title_match:
         title = title_match.group(1).lower().strip()
-        if title in ["under construction", "parked", "coming soon", "welcome to", "plesk", "cpanel"]:
-            return True, f"Title: {title}"
+        strict_titles = ["under construction", "parked", "coming soon", "welcome to plesk", "welcome to cpanel", "index of /", "default page", "account suspended", "domain is for sale"]
+        if any(st == title for st in strict_titles):
+            return True, f"Technical Title: {title}"
+        if title == "domain for sale" or title == "this domain is for sale":
+            return True, "Technical Title: For Sale"
+
+    # --- 2. STRICT KEYWORDS (Word Boundaries) ---
+    combined = (html_lower + " " + text_lower)
+    for kw in PARKED_KEYWORDS_STRICT:
+        # Use regex for word boundaries if it's not a URL-like string
+        if "." in kw and not " " in kw:
+            if kw in combined: return True, f"Strict Match (URL): {kw}"
+        else:
+            pattern = rf"\b{re.escape(kw)}\b"
+            if re.search(pattern, combined):
+                return True, f"Strict Match: {kw}"
+
+    # --- 3. WEAK KEYWORDS (Heuristic Context) ---
+    content_length = len(text_lower)
+    is_extremely_sparse = content_length < 400
+    
+    for kw in PARKED_KEYWORDS_WEAK:
+        pattern = rf"\b{re.escape(kw)}\b"
+        if re.search(pattern, text_lower):
+            # Trigger if it's in the title (stronger signal)
+            if title_match and kw in title_match.group(1).lower():
+                return True, f"Weak Match (Title): {kw}"
+            # Trigger if page is extremely sparse (typical of parked pages)
+            if is_extremely_sparse:
+                return True, f"Weak Match (Sparse Content): {kw}"
             
     return False, ""
 
