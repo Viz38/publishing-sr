@@ -355,7 +355,9 @@ class TypeCPipeline:
         monitor = SystemHealthMonitor()
         import random
         # Jitter start to prevent CPU storm
-        await asyncio.sleep(random.uniform(5.0, 20.0))
+        j_time = random.uniform(1.0, 5.0)
+        pipeline_logger.debug(f"WORKER: Jittering for {j_time:.1f}s...")
+        await asyncio.sleep(j_time)
         while True:
             idx, row = await w_q.get()
             try:
@@ -455,25 +457,30 @@ class TypeCPipeline:
         except: pass
 
 async def main():
-    import sys
-    row = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    mode = sys.argv[2] if len(sys.argv) > 2 else "full"
-    
-    # Check for sheet_id and no-format
-    sheet_id = None
-    if "--sheet_id" in sys.argv:
-        idx = sys.argv.index("--sheet_id")
-        if idx + 1 < len(sys.argv):
-            sheet_id = sys.argv[idx + 1]
-    
-    apply_formatting = True
-    if "--no-format" in sys.argv:
-        apply_formatting = False
+    try:
+        import sys
+        row = int(sys.argv[1]) if len(sys.argv) > 1 else 3
+        mode = sys.argv[2] if len(sys.argv) > 2 else "full"
         
-    pipeline = TypeCPipeline(row, mode)
-    if sheet_id:
-        pipeline.config["SHEET_ID"] = sheet_id
-    pipeline.apply_formatting = apply_formatting
-    await pipeline.run()
+        # Check for sheet_id and no-format
+        sheet_id = None
+        if "--sheet_id" in sys.argv:
+            idx = sys.argv.index("--sheet_id")
+            if idx + 1 < len(sys.argv):
+                sheet_id = sys.argv[idx + 1]
+        
+        apply_formatting = True
+        if "--no-format" in sys.argv:
+            apply_formatting = False
+            
+        pipeline = TypeCPipeline(row, mode)
+        if sheet_id:
+            pipeline.config["SHEET_ID"] = sheet_id
+        pipeline.apply_formatting = apply_formatting
+        await pipeline.run()
+    except Exception as e:
+        import traceback
+        pipeline_logger.critical(f"FATAL PIPELINE CRASH: {e}\n{traceback.format_exc()}")
+        sys.exit(1)
 
 if __name__ == "__main__": asyncio.run(main())

@@ -95,8 +95,7 @@ async def run_pipeline_task(request: RunRequest):
             *cmd,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=os.path.dirname(os.path.abspath(__file__)),
-            preexec_fn=os.setsid # Create a process group
+            cwd=os.path.dirname(os.path.abspath(__file__))
         )
         state["active_pid"] = process.pid
         logger.info(f"Pipeline started with PID: {process.pid}")
@@ -163,11 +162,10 @@ async def cancel_pipeline():
     if state["active_pid"]:
         try:
             import signal
-            # Kill the entire process group (negative PID means group)
-            os.killpg(os.getpgid(state["active_pid"]), signal.SIGKILL)
-            logger.info(f"Killed process group for PID {state['active_pid']}")
+            os.kill(state["active_pid"], signal.SIGKILL)
+            logger.info(f"Killed process {state['active_pid']}")
         except Exception as e:
-            logger.error(f"Failed to kill process group {state['active_pid']}: {e}")
+            logger.error(f"Failed to kill process {state['active_pid']}: {e}")
     state["status"] = "idle"
     state["active_pid"] = None
     return {"status": "ok"}

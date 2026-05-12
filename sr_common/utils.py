@@ -59,7 +59,7 @@ class SystemHealthMonitor:
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
-            await asyncio.sleep(15) # Wait 15s between checks (User requested)
+            await asyncio.sleep(5) # Shorter sleep to prevent AppScript timeouts
 
 # Load Parked Domain Dictionary
 PARKED_KEYWORDS_STRICT = []
