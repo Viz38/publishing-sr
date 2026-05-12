@@ -1,14 +1,13 @@
-## [2026-05-12] Fix: "Success" False Positives & Scraping Validation
+## [2026-05-12] Fetch Hardening: Minimum Content Length & Stricter Validation
 Files changed:
 - TypeA/main.py
 - TypeB/main.py
 - TypeC/main.py
 Reason:
-Address 23+ cases where domains were marked as "Success" without LLM processing due to empty/tiny content returning from Tier 3 scrapers.
+Prevent "Success" false positives in Google Sheets when a site returns 200 OK but with empty/insufficient content (observed in 23 cases).
 Key Fixes:
-- **Tier 3 Length Validation**: Enforced a minimum of 300 characters for Tier 3 (Stealth) fetches before allowing a "Success" state.
-- **Stricter Fetch Logic**: Updated `process_domain_stage1` to explicitly check for `html is None` or `len(html) < 200`, preventing falsy empty strings from masquerading as valid fetches.
-- **Improved Error Messaging**: Distinguishes between a genuine fetch failure (None) and insufficient content (<200 chars).
+- **Tier 3 Length Check**: Enforced a 300-character minimum for the Scrapling Stealth (Tier 3) scraper before allowing a "Success" status.
+- **Pipeline Validation**: Refined `process_domain_stage1` to explicitly fail with "Low Content" if the fetched HTML is under 300 characters, even if HTTP status is 200.
 
 ## [2026-05-12] Resilience Hardening: LLM Retry, Timeouts & Proxy Recovery
 Files changed:
