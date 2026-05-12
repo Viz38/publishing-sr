@@ -5,7 +5,7 @@ Files changed:
 Reason:
 Ensured that the company name from the sheet is written to the Tracxn `domain-profile` entity during the automated publishing process.
 Key Fixes:
-- **API Payload Update**: Added the `name` field to the `domain-profile` PUT request payload in both Type B and Type C pipelines.
+- **API Payload Update**: Added the `companyName` field to the `domain-profile` PUT request payload in both Type B and Type C pipelines.
 
 ## [2026-05-12] Fetch Hardening: Minimum Content Length & Stricter Validation
 Files changed:
