@@ -12,6 +12,7 @@ export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 OS=$(uname -s)
 REAL_USER=${SUDO_USER:-$USER}
+REAL_GROUP=$(id -gn "$REAL_USER")
 LOCK_FILE="/tmp/sr_control.lock"
 
 # --- Lock File Mechanism ---
@@ -297,7 +298,7 @@ create_runner() {
     local runner="$f_path/runner.sh"
     # Robust permission fix: Reset Logs directory
     sudo mkdir -p "$f_path/Logs"
-    sudo chown -R $REAL_USER:$REAL_USER "$f_path"
+    sudo chown -R $REAL_USER:$REAL_GROUP "$f_path"
     sudo chmod -R 775 "$f_path/Logs"
     # Create empty log file if not exists
     sudo -u $REAL_USER touch "$f_path/Logs/api.logs"
@@ -310,7 +311,7 @@ export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
 ./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
-    sudo chown $REAL_USER:$REAL_USER "$runner"
+    sudo chown $REAL_USER:$REAL_GROUP "$runner"
     sudo chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
 }
