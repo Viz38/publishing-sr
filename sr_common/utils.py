@@ -10,6 +10,40 @@ from .models import LLMResult
 
 logger = logging.getLogger("sr_common.utils")
 
+class SystemHealthMonitor:
+    """
+    Monitors CPU and RAM usage to prevent system saturation.
+    Ensures workers only process domains when resources are within safe limits.
+    Uses non-blocking cpu_percent(interval=None) to avoid stalling the async event loop.
+    """
+    def __init__(self, cpu_threshold: float = 75.0, mem_threshold: float = 90.0):
+        self.cpu_threshold = cpu_threshold
+        self.mem_threshold = mem_threshold
+        import psutil
+        self._psutil = psutil
+        # Prime the CPU counter so subsequent non-blocking reads are meaningful
+        self._psutil.cpu_percent(interval=None)
+
+    def is_healthy(self) -> Tuple[bool, str]:
+        cpu = self._psutil.cpu_percent(interval=None)
+        mem = self._psutil.virtual_memory().percent
+        
+        if cpu > self.cpu_threshold:
+            return False, f"CPU too high ({cpu}%)"
+        if mem > self.mem_threshold:
+            return False, f"Memory too high ({mem}%)"
+        return True, "Healthy"
+
+    async def wait_for_resources(self, logger=None):
+        """Pauses execution if system resources are saturated."""
+        while True:
+            healthy, reason = self.is_healthy()
+            if healthy:
+                break
+            if logger:
+                logger.warning(f"HEALTH_GATE: Pausing - {reason}")
+            await asyncio.sleep(5)
+
 # Load Parked Domain Dictionary
 PARKED_KEYWORDS_STRICT = []
 PARKED_KEYWORDS_WEAK = []
@@ -181,3 +215,21 @@ def extract_descriptions(text: str) -> Tuple[str, str]:
         sd, ld = (sd_m.group(1).strip() if sd_m else ""), (ld_m.group(1).strip() if ld_m else "")
         
     return " ".join(sd.split()).rstrip('.'), " ".join(ld.split())
+
+def get_dynamic_max_workers(cpu_cap: int = 25, ram_per_worker_gb: float = 0.12) -> int:
+    """
+    Calculates the maximum number of concurrent workers based on system resources.
+    Assumes ~120MB per worker (optimized).
+    """
+    import psutil
+    cores = psutil.cpu_count(logical=False) or 2
+    total_mem_gb = psutil.virtual_memory().total / (1024**3)
+    
+    # 1. CPU-based scaling (4 workers per physical core, since it's IO-heavy)
+    cpu_limit = cores * 4
+    
+    # 2. RAM-based scaling (Up to 90% utilization)
+    ram_limit = int((total_mem_gb * 0.9) / ram_per_worker_gb)
+    
+    # Return the most restrictive limit, capped at 25 for API safety
+    return max(1, min(cpu_limit, ram_limit, cpu_cap))

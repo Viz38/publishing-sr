@@ -16,7 +16,9 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.clients import RateLimiter, GoogleSheetsClient
-from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain
+from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor
+
+_DYNAMIC_WORKERS = get_dynamic_max_workers()
 
 # Configuration
 CONFIG = {
@@ -25,8 +27,8 @@ CONFIG = {
     "FEED_OWNER_SHEET_ID": settings.FEED_OWNER_SHEET_ID,
     "EXTRACTING_SHEET_NAME": "DB",
     "CREDENTIALS_FILE": os.path.join(os.path.dirname(os.path.abspath(__file__)), "TypeC.json"),
-    "MAX_WORKERS": min(psutil.cpu_count(logical=False) or 4, 5),
-    "MAX_CONCURRENT_BROWSERS": min(psutil.cpu_count(logical=False) or 4, 5),
+    "MAX_WORKERS": _DYNAMIC_WORKERS,
+    "MAX_CONCURRENT_BROWSERS": _DYNAMIC_WORKERS,
     "GEMINI_API_URL": settings.GEMINI_API_URL,
     "GEMINI_API_KEY": settings.TYPEC_GEMINI_API_KEY,
     "MAX_PROMPT_SIZE": settings.MAX_PROMPT_SIZE,
@@ -314,9 +316,11 @@ class TypeCPipeline:
                     await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map):
+        monitor = SystemHealthMonitor()
         while True:
             idx, row = await w_q.get()
             try:
+                await monitor.wait_for_resources(logger=pipeline_logger)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})

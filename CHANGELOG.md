@@ -12,7 +12,20 @@ Related tests:
 - Verified against 8 test scenarios covering false positives (legitimate business text) and true parked signatures.
 - **Production Validation**: Successfully verified 6 specific false-positive domains (`cotesa.com.es`, `hocloop.eu`, `agwelldrilling.com`, `njmcdirect.shop`, `bolma.ng`, `alltagskompetenzen.bayern`) which now all correctly pass as CLEAN.
 
-## [2026-05-12] Performance & Resource Optimization
+## [2026-05-12] Resource-Adaptive Concurrency & Health Monitoring
+Files changed:
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Optimize engine performance for both high-end and low-end hardware while ensuring system stability.
+Key Upgrades:
+- **Dynamic Worker Scaling**: Implemented `get_dynamic_max_workers` using realistic 120MB/worker RAM assumptions and physical core counts. Scales up to 25 workers on high-end machines.
+- **System Health Gate**: Integrated `SystemHealthMonitor` into the worker loops. Workers now automatically pause if CPU usage > 75% or RAM > 90%.
+- **Automatic Backoff**: Implemented a 5-second backoff when resource thresholds are breached, preventing system lockups on low-end machines.
+- **API Guard**: Maintained strict Tracxn (160 RPM) and Gemini (2000 RPM) rate limits across all concurrent workers.
+
 Files changed:
 - sr_common/utils.py
 - sr_common/config.py
