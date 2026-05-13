@@ -161,6 +161,7 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter) 
                     text=text,
                     prompt_tokens=usage.get("promptTokenCount", 0),
                     candidate_tokens=usage.get("candidatesTokenCount", 0),
+                    thinking_tokens=usage.get("reasoningTokenCount", 0),
                     success=True
                 )
         except Exception as e:

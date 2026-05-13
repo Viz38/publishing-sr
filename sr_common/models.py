@@ -17,6 +17,7 @@ class LLMResult(BaseModel):
     text: str
     prompt_tokens: int = 0
     candidate_tokens: int = 0
+    thinking_tokens: int = 0
     success: bool = True
 
 class APIResponse(BaseModel):

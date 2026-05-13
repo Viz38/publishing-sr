@@ -276,7 +276,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     p1 = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
     res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
     res_p1 = res_p1_obj.text
-    in1, out1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens
+    in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
     sd, ld1 = extract_descriptions(res_p1)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
@@ -291,7 +291,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
     res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
     res_p2 = res_p2_obj.text
-    in2, out2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens
+    in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
     _, ld2 = extract_descriptions(res_p2)
     
     ld_main = f"{ld1}\n\n{ld2}"
@@ -303,12 +303,12 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", "\n".join([f"{r[0]}. {r[1]} - {r[2]}" for r in bm_mapping.get(feed, {}).get("1stLevel", [])]))
     res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
     res_bm1 = res_bm1_obj.text
-    in3, out3 = res_bm1_obj.prompt_tokens, res_bm1_obj.candidate_tokens
+    in3, out3, think3 = res_bm1_obj.prompt_tokens, res_bm1_obj.candidate_tokens, res_bm1_obj.thinking_tokens
     bm_name_1 = "No Results"
     m = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm1, re.M)
     if m: bm_name_1 = m.group(1).strip()
     
-    bm_name_2, bm_id_2, res_bm2, bm_p2, in4, out4 = "No BM matched", "No ID", "", "", 0, 0
+    bm_name_2, bm_id_2, res_bm2, bm_p2, in4, out4, think4 = "No BM matched", "No ID", "", "", 0, 0, 0
     f_bms2 = bm_mapping.get(feed, {}).get("2ndLevel", [])
     if bm_name_1 != "No Results" and f_bms2:
         filt = [s for s in f_bms2 if s[2].startswith(bm_name_1)]
@@ -316,7 +316,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", "\n".join([" ".join(map(str, r)) for r in filt]))
             res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
             res_bm2 = res_bm2_obj.text
-            in4, out4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens
+            in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
             m2 = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm2, re.M)
             if m2: bm_name_2 = m2.group(1).strip(); bm_id_2 = bm_ids.get(bm_name_2, "No ID")
             elif bm_1st_stat.get(bm_name_1) == "Live": bm_name_2, bm_id_2 = bm_name_1, bm_ids.get(bm_name_1, "No ID")
@@ -325,7 +325,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     return {
         "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
         "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_2, "bm_id": bm_id_2, "sf": ", ".join(hashtags), "feed_id": f_id,
-        "tokens": {"in": in1+in2+in3+in4, "out": out1+out2+out3+out4}, "body_len": len(combined)
+        "tokens": {"in": in1+in2+in3+in4, "out": out1+out2+out3+out4, "think": think1+think2+think3+think4}, "body_len": len(combined)
     }
 
 class TypeAPipeline:
@@ -458,14 +458,14 @@ class TypeAPipeline:
                             "ld2": row[11], "bmp1": row[12], "bmr1": row[13], "bmp2": row[14], "bmr2": row[15],
                             "bm_name": row[16], "bm_id": row[17], "sf": row[18], "feed_id": row[19],
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
-                            "tokens": {"in":0, "out":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
+                            "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)
                 
                 if res["type"] == "success":
                     if self.mode != "phase2":
                         await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
-                        await r_q.put({'range': f"X{idx}:Y{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
+                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")

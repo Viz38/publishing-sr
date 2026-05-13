@@ -252,7 +252,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) ->
         
     p1 = prompts[0].replace("XX", body[:20000])
     res_obj = await call_gemini_api(session, p1, gemini_limiter)
-    res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
+    res, in_p, out_p, think_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens, res_obj.thinking_tokens
     
     sd, ld = extract_descriptions(res)
     if sd == "NO_DATA":
@@ -268,7 +268,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) ->
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     return {
-        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p}, 
+        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p, "think": think_p}, 
         "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], 
         "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
         "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
@@ -380,14 +380,14 @@ class TypeCPipeline:
                             "type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id,
                             "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
                             "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
-                            "tokens": {"in":0, "out":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
+                            "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map)
                 
                 if res["type"] == "success":
                     if self.mode != "phase2":
                         await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
-                        await r_q.put({'range': f"O{idx}:P{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"]]]})
+                        await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
