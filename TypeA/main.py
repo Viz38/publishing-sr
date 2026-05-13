@@ -464,7 +464,7 @@ class TypeAPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)
                 
                 if res["type"] == "success":
-                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"]})
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
                         await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
@@ -498,7 +498,7 @@ class TypeAPipeline:
 
     async def sheet_writer(self, r_q, ws, total, gc, pipeline_name):
         processed, s, f = set(), 0, 0
-        batch_in, batch_out, batch_think = 0, 0, 0
+        batch_in, batch_out, batch_think, batch_rows = 0, 0, 0, 0
         while True:
             updates = []
             while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
@@ -512,6 +512,7 @@ class TypeAPipeline:
                         batch_in += item.get('in', 0)
                         batch_out += item.get('out', 0)
                         batch_think += item.get('think', 0)
+                        batch_rows += item.get('rows', 0)
                         r_q.task_done(); continue
                 updates.append(item)
             if updates:
@@ -521,20 +522,22 @@ class TypeAPipeline:
                         m = re.search(r'\d+', u['range'])
                         if m: processed.add(int(m.group()))
                     
-                    if batch_in > 0 or batch_out > 0 or batch_think > 0:
+                    if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
                         try:
                             t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
                             t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4"])
+                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
+                            curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
                             await t_ws.batch_update([
                                 {'range': 'B2', 'values': [[curr_in + batch_in]]},
                                 {'range': 'B3', 'values': [[curr_out + batch_out]]},
-                                {'range': 'B4', 'values': [[curr_think + batch_think]]}
+                                {'range': 'B4', 'values': [[curr_think + batch_think]]},
+                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]}
                             ], value_input_option='USER_ENTERED')
-                            batch_in, batch_out, batch_think = 0, 0, 0
+                            batch_in, batch_out, batch_think, batch_rows = 0, 0, 0, 0
                         except Exception as e:
                             logging.error(f"Error updating tracking sheet: {e}")
                 except Exception as e:
