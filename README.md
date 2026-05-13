@@ -1,4 +1,4 @@
-# SR Publishing Engine v6.8
+# SR Publishing Engine V6.8
 
 A high-performance, Python-native automation suite designed to stabilize and scale the Tracxn publishing pipeline. Supports multi-engine types (A, B, C) with shared core logic and centralized configuration.
 
