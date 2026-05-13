@@ -126,7 +126,42 @@ def is_parked_domain(html: str, text: str) -> Tuple[bool, str]:
             
     return False, ""
 
-async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter) -> LLMResult:
+class GeminiCacheManager:
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.url = f"{settings.GEMINI_CACHE_URL}?key={api_key}"
+        self.caches = {}
+        self.lock = asyncio.Lock()
+
+    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        if key in self.caches:
+            return self.caches[key]
+        
+        async with self.lock:
+            if key in self.caches:
+                return self.caches[key]
+                
+            model_name = settings.GEMINI_API_URL.split("/v1beta/")[1].split(":")[0]
+            payload = {
+                "model": model_name,
+                "systemInstruction": {"parts": [{"text": system_instruction}]},
+                "ttl": ttl
+            }
+            
+            async with session.post(self.url, json=payload, timeout=30) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    cache_name = data["name"]
+                    self.caches[key] = cache_name
+                    logging.info(f"CACHE CREATED: {key} -> {cache_name}")
+                    return cache_name
+                else:
+                    text = await response.text()
+                    logging.warning(f"CACHE CREATE SKIPPED for {key} (likely under token limit): {response.status} {text}")
+                    self.caches[key] = None
+                    return None
+
+async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None) -> LLMResult:
     import random
     if not prompt or prompt == "noData":
         return LLMResult(text="Error", success=False)
@@ -134,12 +169,18 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter) 
     url = f"{settings.GEMINI_API_URL}?key={settings.TYPEA_GEMINI_API_KEY}"
     max_retries = 3
     
+    payload = {"contents": [{"parts": [{"text": prompt}]}]}
+    if cached_content_name:
+        payload["cachedContent"] = cached_content_name
+    elif system_instruction:
+        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+    
     for attempt in range(max_retries):
         await limiter.throttle()
         logging.debug(f"GEMINI REQ: Sending prompt (Size: {len(prompt)}) | Attempt: {attempt + 1}")
         try:
             timeout = aiohttp.ClientTimeout(total=60)
-            async with session.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=timeout) as response:
+            async with session.post(url, json=payload, timeout=timeout) as response:
                 res = await response.json()
                 
                 if response.status == 429:
@@ -154,14 +195,27 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter) 
                     logging.error(f"GEMINI ERR {response.status}: {res}")
                     return LLMResult(text="Error", success=False)
                 
-                text = res['candidates'][0]['content']['parts'][0]['text']
+                parts = res.get('candidates', [{}])[0].get('content', {}).get('parts', [])
+                text_parts = []
+                thinking_parts = []
+                for p in parts:
+                    if p.get("thought") == True:
+                        thinking_parts.append(p.get("text", ""))
+                    else:
+                        text_parts.append(p.get("text", ""))
+                
+                text = "".join(text_parts)
+                thinking_text = "".join(thinking_parts)
+                
                 usage = res.get("usageMetadata", {})
-                logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)})")
+                think_toks = usage.get("thoughtsTokenCount", usage.get("thoughts_token_count", usage.get("reasoningTokenCount", 0)))
+                logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)} | Think: {think_toks})")
                 return LLMResult(
                     text=text,
+                    thinking_text=thinking_text,
                     prompt_tokens=usage.get("promptTokenCount", 0),
                     candidate_tokens=usage.get("candidatesTokenCount", 0),
-                    thinking_tokens=usage.get("reasoningTokenCount", 0),
+                    thinking_tokens=think_toks,
                     success=True
                 )
         except Exception as e:

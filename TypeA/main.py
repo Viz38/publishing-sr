@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.clients import RateLimiter, GoogleSheetsClient
-from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor
+from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, GeminiCacheManager
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
 
@@ -237,7 +237,7 @@ def extract_links(html: str, base_url: str) -> Set[str]:
             links.add(url.split('#')[0].rstrip('/'))
     return links
 
-async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map) -> Dict:
+async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
@@ -274,10 +274,20 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     combined = "\n\n".join(body_results)
     pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)}")
     
-    p1 = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
-    res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
+    parts_p1 = prompts[0].split("XX")
+    if len(parts_p1) == 2:
+        sys_p1 = parts_p1[1].strip()
+        user_p1 = parts_p1[0].strip() + "\n\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
+        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
+        bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
+    else:
+        bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
+        res_p1_obj = await call_gemini_api(session, bm_p1_raw, gemini_limiter)
+    
     res_p1 = res_p1_obj.text
     in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
+    think_text = f"P1:\n{res_p1_obj.thinking_text}\n" if res_p1_obj.thinking_text else ""
     sd, ld1 = extract_descriptions(res_p1)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
@@ -289,10 +299,19 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
         return {"type": "error", "reason": "LLM failed to generate descriptions"}
 
-    p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
-    res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
+    parts_p2 = prompts[1].split("Your task:")
+    if len(parts_p2) == 2:
+        sys_p2 = "Your task:\n" + parts_p2[1].strip()
+        user_p2 = parts_p2[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd).strip()
+        cache_id = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
+        res_p2_obj = await call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id)
+    else:
+        p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
+        res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
+        
     res_p2 = res_p2_obj.text
     in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
+    if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
     _, ld2 = extract_descriptions(res_p2)
     
     ld_main = f"{ld1}\n\n{ld2}"
@@ -301,10 +320,22 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     # BM Logic
     pipeline_logger.info(f"PROCESS: Running BM prediction for {domain}")
-    bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", "\n".join([f"{r[0]}. {r[1]} - {r[2]}" for r in bm_mapping.get(feed, {}).get("1stLevel", [])]))
-    res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
+    bm_paths_str_1 = "\n".join([f"{r[0]}. {r[1]} - {r[2]}" for r in bm_mapping.get(feed, {}).get("1stLevel", [])])
+    parts_bm1 = prompts[6].split("Company Description:\nYY")
+    if len(parts_bm1) == 2:
+        sys_bm1 = (parts_bm1[0].strip() + "\n\n" + parts_bm1[1].strip()).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
+        user_bm1 = "Company Description:\n" + ld_main
+        cache_key = f"prompt_6_{f_id}"
+        cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm1)
+        res_bm1_obj = await call_gemini_api(session, user_bm1, gemini_limiter, system_instruction=sys_bm1, cached_content_name=cache_id)
+        bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1) # for logging
+    else:
+        bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
+        res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
+        
     res_bm1 = res_bm1_obj.text
     in3, out3, think3 = res_bm1_obj.prompt_tokens, res_bm1_obj.candidate_tokens, res_bm1_obj.thinking_tokens
+    if res_bm1_obj.thinking_text: think_text += f"BM1:\n{res_bm1_obj.thinking_text}\n"
     bm_name_1 = "No Results"
     m = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm1, re.M)
     if m: bm_name_1 = m.group(1).strip()
@@ -314,10 +345,22 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     if bm_name_1 != "No Results" and f_bms2:
         filt = [s for s in f_bms2 if s[2].startswith(bm_name_1)]
         if filt:
-            bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", "\n".join([" ".join(map(str, r)) for r in filt]))
-            res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
+            bm_paths_str_2 = "\n".join([" ".join(map(str, r)) for r in filt])
+            parts_bm2 = prompts[7].split("Company Description:\nXX")
+            if len(parts_bm2) == 2:
+                sys_bm2 = (parts_bm2[0].strip() + "\n\n" + parts_bm2[1].strip()).replace("BM_Paths", bm_paths_str_2)
+                user_bm2 = "Company Description:\n" + ld_main
+                cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
+                cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
+                res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id)
+                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2) # for logging
+            else:
+                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
+                res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
+                
             res_bm2 = res_bm2_obj.text
             in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
+            if res_bm2_obj.thinking_text: think_text += f"BM2:\n{res_bm2_obj.thinking_text}\n"
             m2 = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm2, re.M)
             if m2: bm_name_2 = m2.group(1).strip(); bm_id_2 = bm_ids.get(bm_name_2, "No ID")
             elif bm_1st_stat.get(bm_name_1) == "Live": bm_name_2, bm_id_2 = bm_name_1, bm_ids.get(bm_name_1, "No ID")
@@ -326,7 +369,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     return {
         "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
         "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_2, "bm_id": bm_id_2, "sf": ", ".join(hashtags), "feed_id": f_id,
-        "tokens": {"in": in1+in2+in3+in4, "out": out1+out2+out3+out4, "think": think1+think2+think3+think4}, "body_len": len(combined)
+        "tokens": {"in": in1+in2+in3+in4, "out": out1+out2+out3+out4, "think": think1+think2+think3+think4}, "thinking_text": think_text, "body_len": len(combined)
     }
 
 class TypeAPipeline:
@@ -406,9 +449,10 @@ class TypeAPipeline:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 
+        cache_manager = GeminiCacheManager(settings.TYPEA_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeA"))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
@@ -422,7 +466,7 @@ class TypeAPipeline:
                             os="windows",
                             i_know_what_im_doing=True
                         ) as browser:
-                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                             writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeA"))
                             await work_queue.join()
                             [t.cancel() for t in tasks]
@@ -434,7 +478,7 @@ class TypeAPipeline:
                         await asyncio.sleep(10)
                         await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
-    async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map):
+    async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager):
         monitor = SystemHealthMonitor()
         import random
         # Jitter start to prevent CPU storm
@@ -461,13 +505,13 @@ class TypeAPipeline:
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
-                else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map)
+                else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)
                 
                 if res["type"] == "success":
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
-                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
+                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")

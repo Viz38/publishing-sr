@@ -84,7 +84,7 @@ fi
 
 FOLDERS=("TypeA" "TypeB" "TypeC")
 PORTS=(8767 8765 8766)
-NAMES=("sr-typea" "sr-typeb" "sr-typec")
+NAMES=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached")
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -240,7 +240,7 @@ stop_all() {
     echo -e "${RED}🛑 Stopping all services...${NC}"
     
     if [[ "$OS" == "Darwin" ]]; then
-        local all_labels=("sr-typea" "sr-typeb" "sr-typec" "typea-api" "typeb-api" "typec-api" "com.tracxn.sr.typea" "com.tracxn.sr.typeb" "com.tracxn.sr.typec")
+        local all_labels=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached" "sr-typea" "sr-typeb" "sr-typec" "typea-api" "typeb-api" "typec-api" "com.tracxn.sr.typea" "com.tracxn.sr.typeb" "com.tracxn.sr.typec")
         for n in "${all_labels[@]}"; do
             launchctl bootout "gui/$(id -u)/$n" 2>/dev/null
             launchctl unload "$HOME/Library/LaunchAgents/$n.plist" 2>/dev/null

@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.clients import RateLimiter, GoogleSheetsClient
-from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor
+from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, GeminiCacheManager
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
 
@@ -226,7 +226,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
 
     return None, 0, "Fetch failed"
 
-async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) -> Dict:
+async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
@@ -251,9 +251,24 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) ->
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
         return {"type": "error", "reason": "Low content"}
         
+<<<<<<< HEAD
     p1 = prompts[0].replace("XX", body[:20000])
     res_obj = await call_gemini_api(session, p1, gemini_limiter)
     res, in_p, out_p, think_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens, res_obj.thinking_tokens
+=======
+    parts_p1 = prompts[0].split("XX")
+    if len(parts_p1) == 2:
+        sys_p1 = parts_p1[1].strip()
+        user_p1 = parts_p1[0].strip() + "\n\n" + body[:20000]
+        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        res_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
+    else:
+        p1 = prompts[0].replace("XX", body[:20000])
+        res_obj = await call_gemini_api(session, p1, gemini_limiter)
+        
+    res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
+    think_tokens = res_obj.thinking_tokens
+    think_text = res_obj.thinking_text
     
     sd, ld = extract_descriptions(res)
     if sd == "NO_DATA":
@@ -269,7 +284,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map) ->
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     return {
-        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p, "think": think_p}, 
+        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p, "think": think_tokens}, "thinking_text": think_text,
         "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], 
         "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
         "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
@@ -323,9 +338,10 @@ class TypeCPipeline:
             # No explicit skip column in Type C currently
             await work_queue.put((idx, row))
 
+        cache_manager = GeminiCacheManager(settings.TYPEC_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
@@ -341,7 +357,7 @@ class TypeCPipeline:
                             os="windows",
                             i_know_what_im_doing=True
                         ) as browser:
-                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
+                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                             writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                             
                             # This will run until all work is done or an exception occurs
@@ -356,7 +372,7 @@ class TypeCPipeline:
                         await asyncio.sleep(10)
                         await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
-    async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map):
+    async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map, cache_manager):
         monitor = SystemHealthMonitor()
         import random
         # Jitter start to prevent CPU storm
@@ -383,13 +399,13 @@ class TypeCPipeline:
                             "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
-                else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map)
+                else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager)
                 
                 if res["type"] == "success":
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
-                        await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
+                        await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")

@@ -45,7 +45,8 @@ class Settings(BaseSettings):
     FEED_DEF_SHEET_ID_2: str = ""
     
     # Engine Settings
-    GEMINI_API_URL: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+    GEMINI_API_URL: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash:generateContent"
+    GEMINI_CACHE_URL: str = "https://generativelanguage.googleapis.com/v1beta/cachedContents"
     MAX_PROMPT_SIZE: int = 40000
     BATCH_SIZE: int = 10
     REQUEST_TIMEOUT: int = 90
