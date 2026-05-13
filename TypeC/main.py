@@ -26,6 +26,7 @@ CONFIG = {
     "PROMPTS_SHEET_ID": settings.PROMPTS_SHEET_ID,
     "FEED_OWNER_SHEET_ID": settings.FEED_OWNER_SHEET_ID,
     "EXTRACTING_SHEET_NAME": "DB",
+    "TRACKING_SHEET_ID": "1OvBOAXc_Y5aDLcK-BGCALFUZyJWLYolmFkr3tmo7mj4",
     "CREDENTIALS_FILE": os.path.join(os.path.dirname(os.path.abspath(__file__)), "TypeC.json"),
     "MAX_WORKERS": _DYNAMIC_WORKERS,
     "MAX_CONCURRENT_BROWSERS": _DYNAMIC_WORKERS,
@@ -325,7 +326,7 @@ class TypeCPipeline:
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
-                writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
+                writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
                 while True:
@@ -341,7 +342,7 @@ class TypeCPipeline:
                             i_know_what_im_doing=True
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map)) for _ in range(CONFIG["MAX_WORKERS"])]
-                            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows)))
+                            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                             
                             # This will run until all work is done or an exception occurs
                             await work_queue.join()
@@ -385,6 +386,7 @@ class TypeCPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map)
                 
                 if res["type"] == "success":
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"]})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
                         await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"]["think"]]]})
@@ -426,16 +428,23 @@ class TypeCPipeline:
             finally:
                 w_q.task_done()
 
-    async def sheet_writer(self, r_q, ws, total):
+    async def sheet_writer(self, r_q, ws, total, gc, pipeline_name):
         processed_indices, success_count, fail_count = set(), 0, 0
+        batch_in, batch_out, batch_think = 0, 0, 0
         while True:
             updates = []
             while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
                 item = await r_q.get()
-                if isinstance(item, dict) and item.get('type') == 'progress':
-                    if item.get('is_success'): success_count += 1
-                    else: fail_count += 1
-                    r_q.task_done(); continue
+                if isinstance(item, dict):
+                    if item.get('type') == 'progress':
+                        if item.get('is_success'): success_count += 1
+                        else: fail_count += 1
+                        r_q.task_done(); continue
+                    if item.get('type') == 'tokens':
+                        batch_in += item.get('in', 0)
+                        batch_out += item.get('out', 0)
+                        batch_think += item.get('think', 0)
+                        r_q.task_done(); continue
                 updates.append(item)
             if updates:
                 try:
@@ -443,6 +452,23 @@ class TypeCPipeline:
                     for u in updates:
                         match = re.search(r'\d+', u['range'])
                         if match: processed_indices.add(int(match.group()))
+                    
+                    if batch_in > 0 or batch_out > 0 or batch_think > 0:
+                        try:
+                            t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
+                            t_ws = await t_sheet.worksheet(pipeline_name)
+                            vals = await t_ws.batch_get(["B2", "B3", "B4"])
+                            curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
+                            curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
+                            curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
+                            await t_ws.batch_update([
+                                {'range': 'B2', 'values': [[curr_in + batch_in]]},
+                                {'range': 'B3', 'values': [[curr_out + batch_out]]},
+                                {'range': 'B4', 'values': [[curr_think + batch_think]]}
+                            ], value_input_option='USER_ENTERED')
+                            batch_in, batch_out, batch_think = 0, 0, 0
+                        except Exception as e:
+                            pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                 except Exception as e:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
