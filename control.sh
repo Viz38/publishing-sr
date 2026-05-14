@@ -15,6 +15,14 @@ REAL_USER=${SUDO_USER:-$USER}
 REAL_GROUP=$(id -gn "$REAL_USER")
 LOCK_FILE="/tmp/sr_control.lock"
 
+# --- Smart Sudo Detection ---
+# On macOS, we don't need sudo for directory management in the user's home.
+if [[ "$OS" == "Darwin" ]]; then
+    MAYBE_SUDO=""
+else
+    MAYBE_SUDO="sudo"
+fi
+
 # --- Lock File Mechanism ---
 if [ -f "$LOCK_FILE" ]; then
     OLD_PID=$(cat "$LOCK_FILE")
@@ -256,7 +264,14 @@ stop_all() {
     fi
     
     # Unified Cloudflare Cleanup
-    sudo cloudflared service uninstall 2>/dev/null
+    if [[ "$OS" == "Linux" ]]; then
+        sudo cloudflared service uninstall 2>/dev/null
+    else
+        # On macOS, we check if it was installed as a daemon first
+        if [ -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
+            sudo cloudflared service uninstall 2>/dev/null
+        fi
+    fi
     
     # Nuclear Cleanup for orphaned processes
     pkill -f "uvicorn" 2>/dev/null
@@ -324,11 +339,14 @@ create_runner() {
     local f_label=$3
     local runner="$f_path/runner.sh"
     # Robust permission fix: Reset Logs directory
-    sudo mkdir -p "$f_path/Logs"
-    sudo chown -R $REAL_USER:$REAL_GROUP "$f_path"
-    sudo chmod -R 775 "$f_path/Logs"
+    $MAYBE_SUDO mkdir -p "$f_path/Logs"
+    # Only chown if we are actually running with sudo/on Linux
+    if [[ "$OS" == "Linux" ]]; then
+        sudo chown -R $REAL_USER:$REAL_GROUP "$f_path"
+    fi
+    $MAYBE_SUDO chmod -R 775 "$f_path/Logs"
     # Create empty log file if not exists
-    sudo -u $REAL_USER touch "$f_path/Logs/api.logs"
+    touch "$f_path/Logs/api.logs"
     
     cat <<EOF > "$runner"
 #!/bin/bash
@@ -338,8 +356,7 @@ export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
 ./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
-    sudo chown $REAL_USER:$REAL_GROUP "$runner"
-    sudo chmod +x "$runner"
+    chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
 }
 
@@ -354,11 +371,19 @@ start_standard() {
     # Ensure sr_common is accessible
     export PYTHONPATH="$BASE_DIR:$PYTHONPATH"
     log "INFO" "PYTHONPATH set to $PYTHONPATH"
-    sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
+    
+    # Only install cloudflared service if not already there to avoid sudo spam
     if [[ "$OS" == "Darwin" ]]; then
-        sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
+        if [ ! -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
+            echo -e "${YELLOW}   ▶ Installing Cloudflare Tunnel Service (requires sudo)...${NC}"
+            sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
+            sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
+        fi
     else
-        sudo systemctl enable --now cloudflared 2>/dev/null
+        if ! systemctl is-active --quiet cloudflared; then
+            sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
+            sudo systemctl enable --now cloudflared 2>/dev/null
+        fi
     fi
 
     for i in "${!FOLDERS[@]}"; do
