@@ -484,26 +484,44 @@ while true; do
     case $opt in
         1) 
             if [ -z "$PYTHON_CMD" ]; then echo -e "${RED}Error: No Python 3.10+ found!${NC}"; sleep 3; continue; fi
+            
+            # Check for uv
+            if command -v uv &> /dev/null; then
+                USE_UV=true
+                echo -e "${GREEN}⚡ 'uv' detected! Using ultra-fast dependency resolution.${NC}"
+            else
+                USE_UV=false
+            fi
+
             for f in "${FOLDERS[@]}"; do
                 echo -e "${BLUE}Initializing $f...${NC}"
                 mkdir -p "$f/Logs"
-                [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
                 
-                echo -e "   ▶ Installing Python dependencies..."
-                log "INFO" "Installing Python dependencies for $f"
-                "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
-                
-                if [[ "$OS" == "Linux" ]]; then
-                    echo -e "   ▶ Installing Linux-specific browser dependencies..."
-                    log "INFO" "Installing Playwright browsers for $f (Linux)"
-                    "$f/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
-                    "$f/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
+                if [ "$USE_UV" = true ]; then
+                    [ ! -d "$f/.venv" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" > /dev/null 2>&1
+                    echo -e "   ▶ Installing dependencies via uv..."
+                    uv pip install -r "$f/requirements.txt" --python "$f/.venv" >> "$SETUP_LOG" 2>&1
                 else
-                    echo -e "   ▶ Installing browser binaries..."
-                    log "INFO" "Installing Playwright browsers for $f (macOS)"
-                    "$f/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
+                    [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
+                    echo -e "   ▶ Installing dependencies via pip..."
+                    "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
                 fi
             done
+            
+            echo -e "${YELLOW}🌍 Installing Global Browser Binaries (This only needs to happen once)...${NC}"
+            # Use TypeA's venv to run the global installation logic
+            if [[ "$OS" == "Linux" ]]; then
+                echo -e "   ▶ Installing Linux-specific browser dependencies..."
+                "TypeA/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
+            fi
+            
+            echo -e "   ▶ Downloading Patchright browsers (Chromium, Firefox)..."
+            "TypeA/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
+            
+            echo -e "   ▶ Downloading Camoufox Stealth Browser..."
+            "TypeA/.venv/bin/python" -m camoufox fetch >> "$SETUP_LOG" 2>&1
+            
+            echo -e "${GREEN}✅ Initialization Complete.${NC}"
             read -p "Init Done. Enter...";;
         2) start_standard; read -p "Enter..." ;;
         3) 
