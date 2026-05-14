@@ -142,7 +142,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
         scrap_logger.info(f"TIER 1: Scrapling Request Fetch for {url}")
         
         s_fetcher = Fetcher()
-        s_resp = s_fetcher.get(url)
+        s_resp = await asyncio.to_thread(s_fetcher.get, url)
         
         if s_resp.status == 200:
             content = s_resp.text
@@ -173,7 +173,7 @@ async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
                 
                 await page.route("**/*", block_media)
                 
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=90000)
+                response = await page.goto(url, wait_until="domcontentloaded", timeout=40000)
                 
                 if response and response.status == 200:
                     await asyncio.sleep(5)
