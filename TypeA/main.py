@@ -274,6 +274,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     combined = "\n\n".join(body_results)
     pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)}")
     
+    llm_calls = 0
+    llm_rows = 1
+    
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[1].strip()
@@ -285,19 +288,23 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
         res_p1_obj = await call_gemini_api(session, bm_p1_raw, gemini_limiter)
     
+    llm_calls += 1
     res_p1 = res_p1_obj.text
     in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
     think_text = f"P1:\n{res_p1_obj.thinking_text}\n" if res_p1_obj.thinking_text else ""
+    
+    tokens = {"in": in1, "out": out1, "think": think1}
+    
     sd, ld1 = extract_descriptions(res_p1)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
-        return {"type": "error", "reason": "Low content"}
+        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if sd == "PARKED_LLM":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
-        return {"type": "error", "reason": "Parked"}
+        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if not sd or not ld1:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed to generate descriptions"}
+        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
     parts_p2 = prompts[1].split("Your task:")
     if len(parts_p2) == 2:
@@ -308,10 +315,13 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     else:
         p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
         res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
-        
+    
+    llm_calls += 1
     res_p2 = res_p2_obj.text
     in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
     if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
+    
+    tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
     _, ld2 = extract_descriptions(res_p2)
     
     ld_main = f"{ld1}\n\n{ld2}"
@@ -332,15 +342,18 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     else:
         bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
         res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
-        
+    
+    llm_calls += 1
     res_bm1 = res_bm1_obj.text
     in3, out3, think3 = res_bm1_obj.prompt_tokens, res_bm1_obj.candidate_tokens, res_bm1_obj.thinking_tokens
     if res_bm1_obj.thinking_text: think_text += f"BM1:\n{res_bm1_obj.thinking_text}\n"
+    tokens["in"] += in3; tokens["out"] += out3; tokens["think"] += think3
+    
     bm_name_1 = "No Results"
     m = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm1, re.M)
     if m: bm_name_1 = m.group(1).strip()
     
-    bm_name_2, bm_id_2, res_bm2, bm_p2, in4, out4, think4 = "No BM matched", "No ID", "", "", 0, 0, 0
+    bm_name_final, bm_id_final = "No BM matched", "No ID"
     f_bms2 = bm_mapping.get(feed, {}).get("2ndLevel", [])
     if bm_name_1 != "No Results" and f_bms2:
         filt = [s for s in f_bms2 if s[2].startswith(bm_name_1)]
@@ -353,23 +366,26 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
                 cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
                 res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id)
-                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2) # for logging
             else:
                 bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
                 res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
-                
+            
+            llm_calls += 1
             res_bm2 = res_bm2_obj.text
             in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
             if res_bm2_obj.thinking_text: think_text += f"BM2:\n{res_bm2_obj.thinking_text}\n"
+            tokens["in"] += in4; tokens["out"] += out4; tokens["think"] += think4
             m2 = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm2, re.M)
-            if m2: bm_name_2 = m2.group(1).strip(); bm_id_2 = bm_ids.get(bm_name_2, "No ID")
-            elif bm_1st_stat.get(bm_name_1) == "Live": bm_name_2, bm_id_2 = bm_name_1, bm_ids.get(bm_name_1, "No ID")
+            if m2: bm_name_final = m2.group(1).strip(); bm_id_final = bm_ids.get(bm_name_final, "No ID")
+            elif bm_1st_stat.get(bm_name_1) == "Live": bm_name_final, bm_id_final = bm_name_1, bm_ids.get(bm_name_1, "No ID")
 
-    pipeline_logger.info(f"PROCESS SUCCESS: {domain} | BM: {bm_name_2}")
+    pipeline_logger.info(f"PROCESS SUCCESS: {domain} | BM: {bm_name_final}")
     return {
         "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
-        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_2, "bm_id": bm_id_2, "sf": ", ".join(hashtags), "feed_id": f_id,
-        "tokens": {"in": in1+in2+in3+in4, "out": out1+out2+out3+out4, "think": think1+think2+think3+think4}, "thinking_text": think_text, "body_len": len(combined)
+        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1_raw[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000] if 'bm_p2' in locals() else "", "bmr2": res_bm2[:40000] if 'res_bm2' in locals() else "", "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": ", ".join(hashtags), "feed_id": f_id,
+        "tokens": tokens, "think_text": think_text,
+        "llm_calls": llm_calls, "llm_rows": llm_rows,
+        "body_len": len(combined)
     }
 
 class TypeAPipeline:
@@ -507,11 +523,13 @@ class TypeAPipeline:
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)
                 
+                if "tokens" in res:
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
+
                 if res["type"] == "success":
-                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
-                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
+                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('think_text', '')}"]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
@@ -557,6 +575,7 @@ class TypeAPipeline:
                         batch_out += item.get('out', 0)
                         batch_think += item.get('think', 0)
                         batch_rows += item.get('rows', 0)
+                        batch_calls += item.get('calls', 0)
                         r_q.task_done(); continue
                 updates.append(item)
             if updates:
@@ -570,18 +589,20 @@ class TypeAPipeline:
                         try:
                             t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
                             t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5"])
+                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
                             curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
+                            curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
                             await t_ws.batch_update([
                                 {'range': 'B2', 'values': [[curr_in + batch_in]]},
                                 {'range': 'B3', 'values': [[curr_out + batch_out]]},
                                 {'range': 'B4', 'values': [[curr_think + batch_think]]},
-                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]}
+                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]},
+                                {'range': 'B6', 'values': [[curr_calls + batch_calls]]}
                             ], value_input_option='USER_ENTERED')
-                            batch_in, batch_out, batch_think, batch_rows = 0, 0, 0, 0
+                            batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
                         except Exception as e:
                             logging.error(f"Error updating tracking sheet: {e}")
                 except Exception as e:

@@ -251,11 +251,9 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
         return {"type": "error", "reason": "Low content"}
         
-<<<<<<< HEAD
-    p1 = prompts[0].replace("XX", body[:20000])
-    res_obj = await call_gemini_api(session, p1, gemini_limiter)
-    res, in_p, out_p, think_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens, res_obj.thinking_tokens
-=======
+    llm_calls = 0
+    llm_rows = 1
+    
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[1].strip()
@@ -265,26 +263,30 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     else:
         p1 = prompts[0].replace("XX", body[:20000])
         res_obj = await call_gemini_api(session, p1, gemini_limiter)
-        
+    
+    llm_calls += 1
     res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
     think_tokens = res_obj.thinking_tokens
     think_text = res_obj.thinking_text
     
+    tokens = {"in": in_p, "out": out_p, "think": think_tokens}
+    
     sd, ld = extract_descriptions(res)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
-        return {"type": "error", "reason": "Low content"}
+        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if sd == "PARKED_LLM":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
-        return {"type": "error", "reason": "Parked"}
+        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed"}
+        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     return {
-        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": {"in": in_p, "out": out_p, "think": think_tokens}, "thinking_text": think_text,
+        "type": "success", "sd": sd, "ld": ld[:40000], "tokens": tokens, "thinking_text": think_text,
+        "llm_calls": llm_calls, "llm_rows": llm_rows,
         "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], 
         "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
         "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
@@ -401,8 +403,10 @@ class TypeCPipeline:
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager)
                 
+                if "tokens" in res:
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
+                
                 if res["type"] == "success":
-                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
                         await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
@@ -461,6 +465,7 @@ class TypeCPipeline:
                         batch_out += item.get('out', 0)
                         batch_think += item.get('think', 0)
                         batch_rows += item.get('rows', 0)
+                        batch_calls += item.get('calls', 0)
                         r_q.task_done(); continue
                 updates.append(item)
             if updates:
@@ -474,18 +479,20 @@ class TypeCPipeline:
                         try:
                             t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
                             t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5"])
+                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
                             curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
+                            curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
                             await t_ws.batch_update([
                                 {'range': 'B2', 'values': [[curr_in + batch_in]]},
                                 {'range': 'B3', 'values': [[curr_out + batch_out]]},
                                 {'range': 'B4', 'values': [[curr_think + batch_think]]},
-                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]}
+                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]},
+                                {'range': 'B6', 'values': [[curr_calls + batch_calls]]}
                             ], value_input_option='USER_ENTERED')
-                            batch_in, batch_out, batch_think, batch_rows = 0, 0, 0, 0
+                            batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
                         except Exception as e:
                             pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                 except Exception as e:

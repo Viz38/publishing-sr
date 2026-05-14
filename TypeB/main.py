@@ -252,6 +252,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
         return {"type": "error", "reason": "Low content"}
         
+    llm_calls = 0
+    llm_rows = 1
+    
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[1].strip()
@@ -261,21 +264,25 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     else:
         p1 = prompts[0].replace("XX", body[:20000])
         res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
-        
+    
+    llm_calls += 1
     res_p1 = res_p1_obj.text
     in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
     think_text = f"P1:\n{res_p1_obj.thinking_text}\n" if res_p1_obj.thinking_text else ""
+    
+    tokens = {"in": in1, "out": out1, "think": think1}
+    
     sd, ld = extract_descriptions(res_p1)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
-        return {"type": "error", "reason": "Low content"}
+        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if sd == "PARKED_LLM":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
-        return {"type": "error", "reason": "Parked"}
+        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed"}
+        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     feed = row[h_map["feed"]].split(" : ")[1] if " : " in row[h_map["feed"]] else row[h_map["feed"]]
     f_id, f_def = f_ids.get(feed, ""), f_defs.get(feed, "")
@@ -295,6 +302,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
             res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter)
             
+        llm_calls += 1
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
         if res_bm_obj.thinking_text: think_text += f"BM:\n{res_bm_obj.thinking_text}\n"
         m = re.search(r'^(?:FeedOutput:\s*)?(Yes|No)', bm_res, re.I | re.M)
@@ -309,7 +317,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     return {
         "type": "success", "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
         "sd": sd, "ld": ld[:40000], "bm_res": bm_res[:40000], "bm_name": bm_name, "bm_id": bm_id, "feedcheck": f_chk,
-        "tokens": {"in": in1+in2, "out": out1+out2, "think": think1+think2}, "thinking_text": think_text, "feed_id": f_id, "body_len": len(body)
+        "tokens": {"in": in1+in2, "out": out1+out2, "think": think1+think2}, "think_text": think_text,
+        "llm_calls": llm_calls, "llm_rows": llm_rows,
+        "feed_id": f_id, "body_len": len(body)
     }
 
 class TypeBPipeline:
@@ -432,12 +442,14 @@ class TypeBPipeline:
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)
                 
+                if "tokens" in res:
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
+
                 if res["type"] == "success":
-                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': 1})
                     if self.mode != "phase2":
                         hash_stat = "Yes" if res.get("hash_removed") else "No"
                         await r_q.put({'range': f"H{idx}:P{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
-                        await r_q.put({'range': f"T{idx}:V{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
+                        await r_q.put({'range': f"T{idx}:V{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('think_text', '')}"]]})
                     else:
                         hash_stat = res.get("hash_status", "N/A")
                     
@@ -492,6 +504,7 @@ class TypeBPipeline:
                     batch_out += item.get('out', 0)
                     batch_think += item.get('think', 0)
                     batch_rows += item.get('rows', 0)
+                    batch_calls += item.get('calls', 0)
                     r_q.task_done(); continue
                 updates.append(item)
             if updates:
@@ -505,18 +518,20 @@ class TypeBPipeline:
                         try:
                             t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
                             t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5"])
+                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
                             curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
+                            curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
                             await t_ws.batch_update([
                                 {'range': 'B2', 'values': [[curr_in + batch_in]]},
                                 {'range': 'B3', 'values': [[curr_out + batch_out]]},
                                 {'range': 'B4', 'values': [[curr_think + batch_think]]},
-                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]}
+                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]},
+                                {'range': 'B6', 'values': [[curr_calls + batch_calls]]}
                             ], value_input_option='USER_ENTERED')
-                            batch_in, batch_out, batch_think, batch_rows = 0, 0, 0, 0
+                            batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
                         except Exception as e:
                             pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                 except Exception as e:
