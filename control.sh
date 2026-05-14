@@ -386,6 +386,13 @@ start_standard() {
         fi
     fi
 
+    # Check for unified venv once
+    if [ ! -d "$BASE_DIR/.venv" ]; then
+        echo -e "${RED}❌ Unified Virtual Environment missing!${NC}"
+        echo -e "${YELLOW}   Please run Option 1 (Init Workspace) first.${NC}"
+        return
+    fi
+
     for i in "${!FOLDERS[@]}"; do
         local f_name="${FOLDERS[$i]}"
         local f_port="${PORTS[$i]}"
@@ -396,7 +403,6 @@ start_standard() {
         
         restore_credentials "$f_name" "$f_path"
         
-        [ ! -d "$f_path/.venv" ] && { echo -e "${RED}❌ $f_name: Venv missing!${NC}"; continue; }
         if [ ! -f "$f_creds" ]; then
             echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
             echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${f_name^^}_CREDENTIALS_B64 to .env${NC}"
