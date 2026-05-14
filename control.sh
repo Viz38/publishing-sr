@@ -524,7 +524,7 @@ while true; do
                 
                 if [ "$USE_UV" = true ]; then
                     # If python is missing, we must clear and recreate the venv
-                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" --seed --clear > /dev/null 2>&1
+                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" --clear
                     echo -e "   ▶ Installing dependencies via uv..."
                     uv pip install -r "$f/requirements.txt" --python "$f/.venv/bin/python" >> "$SETUP_LOG" 2>&1
                 else
