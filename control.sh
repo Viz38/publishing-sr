@@ -523,11 +523,12 @@ while true; do
                 mkdir -p "$f/Logs"
                 
                 if [ "$USE_UV" = true ]; then
-                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" > /dev/null 2>&1
+                    # If python is missing, we must clear and recreate the venv
+                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" --seed --clear > /dev/null 2>&1
                     echo -e "   ▶ Installing dependencies via uv..."
-                    uv pip install -r "$f/requirements.txt" --python "$f/.venv" >> "$SETUP_LOG" 2>&1
+                    uv pip install -r "$f/requirements.txt" --python "$f/.venv/bin/python" >> "$SETUP_LOG" 2>&1
                 else
-                    [ ! -f "$f/.venv/bin/python" ] && $PYTHON_CMD -m venv "$f/.venv"
+                    [ ! -f "$f/.venv/bin/python" ] && $PYTHON_CMD -m venv "$f/.venv" --clear
                     echo -e "   ▶ Installing dependencies via pip..."
                     "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
                 fi
