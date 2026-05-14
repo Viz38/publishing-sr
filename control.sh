@@ -523,11 +523,11 @@ while true; do
                 mkdir -p "$f/Logs"
                 
                 if [ "$USE_UV" = true ]; then
-                    [ ! -d "$f/.venv" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" > /dev/null 2>&1
+                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" > /dev/null 2>&1
                     echo -e "   ▶ Installing dependencies via uv..."
                     uv pip install -r "$f/requirements.txt" --python "$f/.venv" >> "$SETUP_LOG" 2>&1
                 else
-                    [ ! -d "$f/.venv" ] && $PYTHON_CMD -m venv "$f/.venv"
+                    [ ! -f "$f/.venv/bin/python" ] && $PYTHON_CMD -m venv "$f/.venv"
                     echo -e "   ▶ Installing dependencies via pip..."
                     "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
                 fi
