@@ -29,12 +29,14 @@ A high-performance, Python-native automation suite designed to stabilize and sca
 
 ## ⚡ Resource & Stability Hardening
 
-Version 6.8 introduces advanced resource management to prevent system crashes on high-load environments:
-
-- **Browser Semaphore**: A global `asyncio.Semaphore(3)` strictly caps parallel browser contexts across all engine workers, preventing CPU spikes.
-- **Memory Safety**: Enforced `try/finally` patterns for all browser contexts ensure that memory is reclaimed immediately after a fetch, even if an error occurs.
-- **Lock-File Protection**: `control.sh` implements a PID-based lock file to prevent multiple instances of the orchestrator from running simultaneously.
 - **Optimized Workers**: Default `MAX_WORKERS` is tuned to **3** for stable operation on standard hardware (Mac Air / 4-core servers).
+
+## 🛡️ Advanced Stealth Architecture (v6.8+)
+Version 6.8+ introduces a production-grade stealth layer in `sr_common/fetcher.py`:
+- **Unified Fetcher**: A multi-tier fallback system (curl-cffi -> Scrapling -> Camoufox) shared across all engines.
+- **TLS/HTTP2 Impersonation**: Uses `curl-cffi` to mimic Chrome 130 fingerprints at the transport layer.
+- **Behavioral Mimicry**: Implements non-linear Bézier mouse paths and Gamma-distributed timing delays to simulate human interaction.
+- **Environmental Coherence**: Ensures OS, hardware concurrency, and screen metrics are synchronized between the request headers and browser environment.
 
 ## 🚀 Setup & Installation
 

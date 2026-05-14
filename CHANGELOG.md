@@ -1,5 +1,24 @@
-# CHANGELOG
-All notable changes to this project are documented here.
+## [2026-05-14] Advanced Stealth & Architectural Refactor (A/B/C Engines)
+Files changed:
+- sr_common/stealth.py [NEW]
+- sr_common/fetcher.py [NEW]
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Implement modern stealth techniques beyond VPN and unify fetching logic for better maintainability (Clean Code).
+Changes:
+1.  **Unified StealthFetcher**: Centralized multi-tier fetching service in `sr_common/fetcher.py`.
+2.  **TLS/HTTP2 Impersonation**: Replaced TIER 0 with `curl-cffi` for browser-grade handshakes.
+3.  **Behavioral Entropy**: Added non-linear Bézier mouse paths and Gamma-distributed jitter in `sr_common/stealth.py`.
+4.  **Hardware Coherence**: Synchronized hardware and OS profiles across all fetcher tiers.
+5.  **Refactoring**: Eliminated ~500 lines of duplicated fetching logic across A/B/C engines.
+6.  **Credential Portability**: Extracted Type A/B/C `.json` credentials to Base64 in `.env`.
+7.  **Automation**: Upgraded `control.sh` to auto-decode `.env` and restore missing `.json` credentials.
+Related tests:
+- tests/test_stealth_utils.py (Passed)
+- tests/test_fetcher.py (Passed)
 
 ## [2026-05-14] Type B and Type C Funnel Fixes
 Files changed:

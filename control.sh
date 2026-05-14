@@ -294,6 +294,30 @@ verify_port() {
     return 1
 }
 
+restore_credentials() {
+    local f_name=$1
+    local f_path=$2
+    local f_creds="$f_path/${f_name}.json"
+    
+    # If the file already exists, we skip restoration to preserve user's local edits if any.
+    if [ ! -f "$f_creds" ]; then
+        local b64_var="${f_name^^}_CREDENTIALS_B64"
+        local b64_val="${!b64_var}"
+        
+        if [ -n "$b64_val" ]; then
+            echo -e "   ▶ Restoring $f_name credentials from .env..."
+            log "INFO" "Restoring credentials for $f_name from Base64 env variable"
+            # Decode based on OS
+            if [[ "$OS" == "Darwin" ]]; then
+                echo "$b64_val" | base64 -D > "$f_creds" 2>/dev/null || echo "$b64_val" | base64 -d > "$f_creds" 2>/dev/null
+            else
+                echo "$b64_val" | base64 -d > "$f_creds" 2>/dev/null
+            fi
+            chmod 600 "$f_creds"
+        fi
+    fi
+}
+
 create_runner() {
     local f_path=$1
     local f_port=$2
@@ -345,10 +369,12 @@ start_standard() {
         
         local f_creds="$f_path/${f_name}.json"
         
+        restore_credentials "$f_name" "$f_path"
+        
         [ ! -d "$f_path/.venv" ] && { echo -e "${RED}❌ $f_name: Venv missing!${NC}"; continue; }
         if [ ! -f "$f_creds" ]; then
             echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
-            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${f_name^^}_CREDENTIALS_B64 to .env${NC}"
             continue
         fi
         
@@ -381,9 +407,11 @@ start_service_mode() {
         local f_runner="$f_path/runner.sh"
         local f_creds="$f_path/${f_name}.json"
         
+        restore_credentials "$f_name" "$f_path"
+        
         if [ ! -f "$f_creds" ]; then
             echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
-            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${f_name^^}_CREDENTIALS_B64 to .env${NC}"
             continue
         fi
         

@@ -16,7 +16,13 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.clients import RateLimiter, GoogleSheetsClient
-from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, GeminiCacheManager
+from sr_common.utils import (
+    call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, 
+    is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, 
+    GeminiCacheManager
+)
+from sr_common.fetcher import StealthFetcher
+from sr_common.stealth import get_browser_profile
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
 
@@ -43,11 +49,6 @@ HEADERS = {
     "accessToken": settings.TYPEC_TRACXN_ACCESS_TOKEN,
     "Content-Type": "application/json",
     "X-Request-Source": 'Type-C-Publishing'
-}
-
-MAIN_HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
 }
 
 # Configure logging
@@ -113,124 +114,14 @@ async def save_snapshot(domain: str, html: str, reason: str):
 
 from urllib.parse import urlparse
 
-# Global semaphore to limit total parallel browser contexts to prevent CPU spikes
-BROWSER_SEMAPHORE = asyncio.Semaphore(CONFIG.get("MAX_CONCURRENT_BROWSERS", 3))
-
-async def fetch_page(browser, url: str) -> Tuple[Optional[str], int, str]:
-    scrap_logger.info(f"FETCH START: {url}")
-    
-    # --- TIER 0: BASIC HTTPX ---
-    try:
-        import httpx
-        scrap_logger.info(f"TIER 0: Basic HTTPX Fetch for {url}")
-        async with httpx.AsyncClient(verify=False, follow_redirects=True, timeout=45) as client:
-            h_resp = await client.get(url, headers=MAIN_HEADERS)
-            if h_resp.status_code == 200:
-                content = h_resp.text
-                if "sgcaptcha" not in content.lower() and len(content) > 1000:
-                    scrap_logger.info(f"TIER 0 SUCCESS: {url} | Chars: {len(content)}")
-                    return content, 200, "Success"
-                scrap_logger.warning(f"TIER 0 FAIL: {url} | Reason: Captcha or Low Content")
-            else:
-                scrap_logger.warning(f"TIER 0 FAIL: {url} | Status: {h_resp.status_code}")
-    except Exception as e:
-        scrap_logger.warning(f"TIER 0 ERR: {url} | {str(e)}")
-
-    # --- TIER 1: SCRAPLING ---
-    try:
-        from scrapling import Fetcher
-        scrap_logger.info(f"TIER 1: Scrapling Request Fetch for {url}")
-        
-        s_fetcher = Fetcher()
-        s_resp = await asyncio.to_thread(s_fetcher.get, url)
-        
-        if s_resp.status == 200:
-            content = s_resp.text
-            if "sgcaptcha" not in content.lower() and len(content) > 1000:
-                scrap_logger.info(f"TIER 1 SUCCESS: {url} | Chars: {len(content)}")
-                return content, 200, "Success"
-            scrap_logger.warning(f"TIER 1 FAIL: {url} | Reason: Captcha or Low Content")
-        else:
-            scrap_logger.warning(f"TIER 1 FAIL: {url} | Status: {s_resp.status}")
-    except Exception as e:
-        scrap_logger.warning(f"TIER 1 ERR: {url} | {str(e)}")
-
-    # --- TIER 2: CAMOUFOX ---
-    for camoufox_attempt in range(2):
-        context = None
-        try:
-            async with BROWSER_SEMAPHORE:
-                scrap_logger.info(f"TIER 2: Camoufox Browser Fetch for {url} (attempt {camoufox_attempt + 1})")
-                context = await browser.new_context(ignore_https_errors=True)
-                page = await context.new_page()
-                
-                # EXPLICIT MEDIA BLOCKING
-                async def block_media(route):
-                    if route.request.resource_type in ["image", "media", "font", "object", "texttrack", "manifest", "other"]:
-                        await route.abort()
-                    else:
-                        await route.continue_()
-                
-                await page.route("**/*", block_media)
-                
-                response = await page.goto(url, wait_until="domcontentloaded", timeout=40000)
-                
-                if response and response.status == 200:
-                    await asyncio.sleep(5)
-                    content = await page.content()
-                    if "sgcaptcha" not in content.lower() and len(content) > 500:
-                        scrap_logger.info(f"TIER 2 SUCCESS: {url} | Chars: {len(content)}")
-                        return content, 200, "Success"
-                    scrap_logger.warning(f"TIER 2 FAIL: {url} | Reason: Captcha or Low Content")
-                else:
-                    scrap_logger.warning(f"TIER 2 FAIL: {url} | Status: {response.status if response else 'No Resp'}")
-                break
-        except Exception as e:
-            err_msg = str(e)
-            scrap_logger.warning(f"TIER 2 ERR: {url} | {err_msg} (attempt {camoufox_attempt + 1})")
-            if "Proxy" in err_msg and camoufox_attempt == 0:
-                scrap_logger.info(f"TIER 2 RETRY: Proxy failure, retrying once for {url}")
-                await asyncio.sleep(2)
-                continue
-        finally:
-            if context:
-                await context.close()
-
-    # --- TIER 3: SCRAPLING STEALTH ---
-    monitor = SystemHealthMonitor()
-    try:
-        # MID-PROCESS CHECK: Wait if CPU is redlining before launching another Playwright process
-        await monitor.wait_for_resources(logger=scrap_logger)
-        
-        async with BROWSER_SEMAPHORE:
-            from scrapling import StealthyFetcher
-            scrap_logger.info(f"TIER 3: Scrapling Stealth (Playwright) for {url}")
-            # NEW: use async_fetch class method to avoid sync-loop crash
-            # Wrap in asyncio.wait_for to forcefully break out of scrapling's internal 3-retry 90-second hang
-            s_resp = await asyncio.wait_for(
-                StealthyFetcher.async_fetch(url, headless=True, timeout=CONFIG["REQUEST_TIMEOUT"] * 1000),
-                timeout=35.0
-            )
-            
-            if s_resp.status == 200:
-                content = s_resp.text
-                if "sgcaptcha" not in content.lower() and len(content) > 300:
-                    scrap_logger.info(f"TIER 3 SUCCESS: {url} | Chars: {len(content)}")
-                    return content, 200, "Success"
-                return None, 200, "Captcha or Low Content"
-            else:
-                return None, s_resp.status, f"Status {s_resp.status}"
-    except Exception as e:
-        scrap_logger.error(f"TIER 3 ERR: {url} | {str(e)}")
-        return None, 0, "Fetch failed"
-
-    return None, 0, "Fetch failed"
+# Global fetcher instance
+fetcher = StealthFetcher()
 
 async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
-    html, _, reason = await fetch_page(browser, f"https://{domain}")
+    html, _, reason = await fetcher.fetch(browser, f"https://{domain}")
     if html is None:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
         return {"type": "error", "reason": reason}
@@ -352,11 +243,15 @@ class TypeCPipeline:
                         # Ensure system is healthy before launching/relaunching browser
                         await SystemHealthMonitor(cpu_threshold=90, mem_threshold=90).wait_for_resources(logger=pipeline_logger)
                         
+                        profile = get_browser_profile("windows")
                         async with AsyncCamoufox(
                             headless=True,
                             humanize=True,
                             block_webrtc=True,
-                            os="windows",
+                            os=profile["os"],
+                            screen_resolution=profile["screen_resolution"],
+                            device_scale_factor=profile["device_scale_factor"],
+                            hardware_concurrency=profile["hardware_concurrency"],
                             i_know_what_im_doing=True
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
