@@ -6,8 +6,8 @@
 # Supports: macOS (Intel/Silicon) & Ubuntu
 # ==========================================================
 
-# Add Homebrew to PATH for macOS
-export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# Add Homebrew and User binaries to PATH
+export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 BASE_DIR=$(cd "$(dirname "$0")" && pwd)
 OS=$(uname -s)
