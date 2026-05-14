@@ -1,3 +1,17 @@
+# CHANGELOG
+All notable changes to this project are documented here.
+
+## [2026-05-14] Type B and Type C Funnel Fixes
+Files changed:
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+- Implemented `force-assign` before `move` in Tracxn API updates to resolve "Funnel State Conflicts".
+- Logic merged from manual testing in `manual.py`.
+- Fixed `batch_calls` initialization in `sheet_writer` to prevent runtime crashes during token tracking.
+Related tests:
+- Manual logic validation via manual.py.
+
 ## [2026-05-12] Stability & Config: Worker Isolation, Safe Scaling, and Dynamic Identity
 Files changed:
 - TypeA/main.py, TypeB/main.py, TypeC/main.py
