@@ -354,7 +354,7 @@ cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-./.venv/bin/python -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
+"$BASE_DIR/.venv/bin/python" -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
@@ -518,34 +518,35 @@ while true; do
                 USE_UV=false
             fi
 
+            echo -e "${BLUE}Initializing Unified Workspace Environment...${NC}"
+            mkdir -p "$BASE_DIR/Logs"
+            
+            # Use root .venv instead of 3 separate ones
+            if [ "$USE_UV" = true ]; then
+                [ ! -f "$BASE_DIR/.venv/bin/python" ] && uv venv "$BASE_DIR/.venv" --python "$PYTHON_CMD" --clear > /dev/null 2>&1
+                echo -e "   ▶ Installing dependencies via uv..."
+                uv pip install -r "TypeA/requirements.txt" --python "$BASE_DIR/.venv/bin/python" >> "$SETUP_LOG" 2>&1
+            else
+                [ ! -f "$BASE_DIR/.venv/bin/python" ] && $PYTHON_CMD -m venv "$BASE_DIR/.venv" --clear
+                echo -e "   ▶ Installing dependencies via pip..."
+                "$BASE_DIR/.venv/bin/python" -m pip install -r "TypeA/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
+            fi
+
             for f in "${FOLDERS[@]}"; do
-                echo -e "${BLUE}Initializing $f...${NC}"
                 mkdir -p "$f/Logs"
-                
-                if [ "$USE_UV" = true ]; then
-                    # If python is missing, we must clear and recreate the venv
-                    [ ! -f "$f/.venv/bin/python" ] && uv venv "$f/.venv" --python "$PYTHON_CMD" --clear
-                    echo -e "   ▶ Installing dependencies via uv..."
-                    uv pip install -r "$f/requirements.txt" --python "$f/.venv/bin/python" >> "$SETUP_LOG" 2>&1
-                else
-                    [ ! -f "$f/.venv/bin/python" ] && $PYTHON_CMD -m venv "$f/.venv" --clear
-                    echo -e "   ▶ Installing dependencies via pip..."
-                    "$f/.venv/bin/python" -m pip install -r "$f/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
-                fi
             done
             
-            echo -e "${YELLOW}🌍 Installing Global Browser Binaries (This only needs to happen once)...${NC}"
-            # Use TypeA's venv to run the global installation logic
+            echo -e "${YELLOW}🌍 Installing Global Browser Binaries...${NC}"
             if [[ "$OS" == "Linux" ]]; then
                 echo -e "   ▶ Installing Linux-specific browser dependencies..."
-                "TypeA/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
+                "$BASE_DIR/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
             fi
             
             echo -e "   ▶ Downloading Patchright browsers (Chromium, Firefox)..."
-            "TypeA/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
+            "$BASE_DIR/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
             
             echo -e "   ▶ Downloading Camoufox Stealth Browser..."
-            "TypeA/.venv/bin/python" -m camoufox fetch >> "$SETUP_LOG" 2>&1
+            "$BASE_DIR/.venv/bin/python" -m camoufox fetch >> "$SETUP_LOG" 2>&1
             
             echo -e "${GREEN}✅ Initialization Complete.${NC}"
             read -p "Init Done. Enter...";;
@@ -569,7 +570,7 @@ while true; do
             if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
                 stop_all
                 echo -e "${BLUE}🧹 Removing virtual environments...${NC}"
-                rm -rf Type*/.venv
+                rm -rf .venv Type*/.venv
                 echo -e "${BLUE}🧹 Removing browser caches...${NC}"
                 rm -rf "$HOME/Library/Caches/ms-playwright" 2>/dev/null
                 rm -rf "$HOME/.cache/ms-playwright" 2>/dev/null
