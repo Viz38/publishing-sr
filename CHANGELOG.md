@@ -1,3 +1,17 @@
+## [2026-05-18] Add User TRACXN-LP-477
+Files changed:
+- .env
+- control.sh
+Reason:
+Provision credentials and identity mapping for new operator user TRACXN-LP-477 to ensure persistent background tunnel connectivity.
+Changes:
+1. **Credentials Allocation**:
+   - Added `TUNNEL_TOKEN_477` with the Cloudflare Tunnel credentials to `.env`.
+2. **Identity Resolution & Case Insensitivity Mapping**:
+   - Integrated user `tracxn-lp-477` case-insensitively into the standard environment loader inside `control.sh` as `Device-477`.
+Related tests:
+- Validated `control.sh` syntax successfully via `bash -n`.
+
 ## [2026-05-18] Credentials Auto-Creation & Interactive Configuration Center
 Files changed:
 - control.sh
