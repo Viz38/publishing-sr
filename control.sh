@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# 🚀 SR PUBLISHING - PRODUCTION v6.4
+# 🚀 SR PUBLISHING - PRODUCTION v6.7
 # ==========================================================
 # Supports: macOS (Intel/Silicon) & Ubuntu
 # ==========================================================
@@ -334,7 +334,8 @@ restore_credentials() {
     
     # If the file already exists, we skip restoration to preserve user's local edits if any.
     if [ ! -f "$f_creds" ]; then
-        local b64_var="${f_name^^}_CREDENTIALS_B64"
+        local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
+        local b64_var="${upper_name}_CREDENTIALS_B64"
         local b64_val="${!b64_var}"
         
         if [ -n "$b64_val" ]; then
@@ -349,6 +350,165 @@ restore_credentials() {
             chmod 600 "$f_creds"
         fi
     fi
+}
+
+auto_create_credentials_explicit() {
+    local force_overwrite=$1
+    echo -e "${BLUE}🔑 Auto-creating JSON credentials from .env...${NC}"
+    
+    # Reload .env to get the latest variables
+    if [ -f "$BASE_DIR/.env" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            [[ "$line" =~ ^#.*$ ]] && continue
+            [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+            export "$line"
+        done < "$BASE_DIR/.env"
+    else
+        echo -e "${RED}❌ .env file not found in $BASE_DIR!${NC}"
+        return 1
+    fi
+    
+    local success=0
+    for i in "${!FOLDERS[@]}"; do
+        local f_name="${FOLDERS[$i]}"
+        local f_path="$BASE_DIR/$f_name"
+        local f_creds="$f_path/${f_name}.json"
+        local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
+        local b64_var="${upper_name}_CREDENTIALS_B64"
+        local b64_val="${!b64_var}"
+        
+        if [ -n "$b64_val" ]; then
+            if [ -f "$f_creds" ] && [ "$force_overwrite" != "true" ]; then
+                echo -e "${YELLOW}⚠️  $f_name.json already exists.${NC}"
+                read -p "   Do you want to overwrite it? (y/n) [y]: " overwrite_confirm
+                overwrite_confirm=${overwrite_confirm:-y}
+                if [[ "$overwrite_confirm" != "y" && "$overwrite_confirm" != "Y" ]]; then
+                    echo -e "   ▶ Skipped overwriting $f_name.json."
+                    continue
+                fi
+            fi
+            
+            mkdir -p "$f_path"
+            echo -e "   ▶ Decoding $f_name credentials from $b64_var..."
+            if [[ "$OS" == "Darwin" ]]; then
+                echo "$b64_val" | base64 -D > "$f_creds" 2>/dev/null || echo "$b64_val" | base64 -d > "$f_creds" 2>/dev/null
+            else
+                echo "$b64_val" | base64 -d > "$f_creds" 2>/dev/null
+            fi
+            
+            if [ -s "$f_creds" ]; then
+                chmod 600 "$f_creds"
+                echo -e "${GREEN}✅ Successfully created $f_creds from .env!${NC}"
+                log "INFO" "Manually triggered auto-creation of $f_creds from .env"
+                success=$((success + 1))
+            else
+                echo -e "${RED}❌ Failed to decode/write $f_creds.${NC}"
+                rm -f "$f_creds"
+            fi
+        else
+            echo -e "${RED}❌ Environment variable $b64_var is empty or not set in .env!${NC}"
+        fi
+    done
+    
+    if [ $success -gt 0 ]; then
+        echo -e "${GREEN}✅ Credentials generation finished ($success successful).${NC}"
+    else
+        echo -e "${YELLOW}⚠️  No credentials files were created or modified.${NC}"
+    fi
+}
+
+configure_credentials_menu() {
+    while true; do
+        clear
+        echo -e "${BLUE}==========================================================${NC}"
+        echo -e "🔑  SR PUBLISHING - CREDENTIALS CONFIGURATION  🔑"
+        echo -e "${BLUE}==========================================================${NC}"
+        
+        # Reload env first to display accurate config status
+        if [ -f "$BASE_DIR/.env" ]; then
+            while IFS= read -r line || [ -n "$line" ]; do
+                [[ "$line" =~ ^#.*$ ]] && continue
+                [[ "$line" =~ ^[[:space:]]*$ ]] && continue
+                export "$line"
+            done < "$BASE_DIR/.env"
+        fi
+
+        # Check status
+        for i in "${!FOLDERS[@]}"; do
+            local f_name="${FOLDERS[$i]}"
+            local f_path="$BASE_DIR/$f_name"
+            local f_creds="$f_path/${f_name}.json"
+            local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
+            local b64_var="${upper_name}_CREDENTIALS_B64"
+            local b64_val="${!b64_var}"
+            
+            echo -e "${YELLOW}📂 $f_name:${NC}"
+            if [ -f "$f_creds" ]; then
+                local size=$(wc -c < "$f_creds" | tr -d ' ')
+                echo -e "   ▶ JSON File:  ${GREEN}PRESENT${NC} ($size bytes)"
+            else
+                echo -e "   ▶ JSON File:  ${RED}MISSING${NC}"
+            fi
+            
+            if [ -n "$b64_val" ]; then
+                echo -e "   ▶ .env B64:   ${GREEN}CONFIGURED${NC} (${#b64_val} chars)"
+            else
+                echo -e "   ▶ .env B64:   ${RED}NOT FOUND${NC}"
+            fi
+            echo ""
+        done
+        
+        echo "----------------------------------------------------------"
+        echo "1) Auto-create respective JSON files from .env"
+        echo "2) Manually input / update credentials"
+        echo "3) Back to Main Menu"
+        echo -e "${BLUE}==========================================================${NC}"
+        read -p "Option [1-3]: " cred_opt
+        
+        case $cred_opt in
+            1)
+                auto_create_credentials_explicit
+                read -p "Press Enter to continue..."
+                ;;
+            2)
+                echo -e "${BLUE}📋 Manual Credentials Setup:${NC}"
+                echo "Select type to configure:"
+                echo "1) Type A"
+                echo "2) Type B"
+                echo "3) Type C"
+                echo "4) Back"
+                read -p "Type [1-4]: " type_opt
+                
+                local selected_type=""
+                case $type_opt in
+                    1) selected_type="TypeA" ;;
+                    2) selected_type="TypeB" ;;
+                    3) selected_type="TypeC" ;;
+                    *) continue ;;
+                esac
+                
+                local f_path="$BASE_DIR/$selected_type"
+                local f_creds="$f_path/${selected_type}.json"
+                
+                echo -e "Enter / paste raw service account JSON content (press ENTER and Ctrl+D when finished):"
+                mkdir -p "$f_path"
+                cat > "$f_creds"
+                
+                if [ -s "$f_creds" ]; then
+                    chmod 600 "$f_creds"
+                    echo -e "${GREEN}✅ Successfully saved manual credentials to $f_creds!${NC}"
+                    log "INFO" "Manually updated $f_creds via raw input"
+                else
+                    echo -e "${RED}❌ Input was empty. No changes made.${NC}"
+                    [ ! -s "$f_creds" ] && rm -f "$f_creds"
+                fi
+                read -p "Press Enter to continue..."
+                ;;
+            3|*)
+                return
+                ;;
+        esac
+    done
 }
 
 create_runner() {
@@ -422,8 +582,9 @@ start_standard() {
         restore_credentials "$f_name" "$f_path"
         
         if [ ! -f "$f_creds" ]; then
+            local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
             echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
-            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${f_name^^}_CREDENTIALS_B64 to .env${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${upper_name}_CREDENTIALS_B64 to .env${NC}"
             continue
         fi
         
@@ -459,8 +620,9 @@ start_service_mode() {
         restore_credentials "$f_name" "$f_path"
         
         if [ ! -f "$f_creds" ]; then
+            local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
             echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
-            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${f_name^^}_CREDENTIALS_B64 to .env${NC}"
+            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${upper_name}_CREDENTIALS_B64 to .env${NC}"
             continue
         fi
         
@@ -510,12 +672,12 @@ EOF"
 while true; do
     clear
     echo -e "${BLUE}==========================================================${NC}"
-    echo -e "🚀  SR PUBLISHING - PRODUCTION v6.6  🚀"
+    echo -e "🚀  SR PUBLISHING - PRODUCTION v6.7  🚀"
     echo -e "👤  Identity: $IDENTITY | Python: ${PYTHON_CMD:-'NOT FOUND'} | OS: $OS"
     echo -e "${BLUE}==========================================================${NC}"
     check_status
     echo -e "----------------------------------------------------------"
-    echo "1) Init Workspace (Venv + Browsers)"
+    echo "1) Init Workspace (Venv + Browsers + Credentials)"
     echo "2) Start Engines (Temp Persistent Background)"
     if [[ "$OS" == "Linux" ]]; then
         echo "3) Start Engines (Production Service Mode - Ubuntu)"
@@ -526,10 +688,11 @@ while true; do
     echo "5) View Live Logs"
     echo "6) Check for Updates"
     echo "7) Clear Logs"
-    echo "8) Exit"
-    echo "9) Deep Clean Workspace (Venvs + Browsers)"
+    echo "8) Configure Credentials"
+    echo "9) Exit"
+    echo "10) Deep Clean Workspace (Venvs + Browsers)"
     echo -e "${BLUE}==========================================================${NC}"
-    read -p "Option [1-9]: " opt
+    read -p "Option [1-10]: " opt
     case $opt in
         1) 
             if [ -z "$PYTHON_CMD" ]; then echo -e "${RED}Error: No Python 3.10+ found!${NC}"; sleep 3; continue; fi
@@ -572,6 +735,10 @@ while true; do
             echo -e "   ▶ Downloading Camoufox Stealth Browser..."
             "$BASE_DIR/.venv/bin/python" -m camoufox fetch >> "$SETUP_LOG" 2>&1
             
+            # Recreate respective credentials JSON files from .env automatically
+            echo -e "${YELLOW}🔑 Auto-recreating Credentials JSON files from .env...${NC}"
+            auto_create_credentials_explicit true
+            
             echo -e "${GREEN}✅ Initialization Complete.${NC}"
             read -p "Init Done. Enter...";;
         2) start_standard; read -p "Enter..." ;;
@@ -587,8 +754,9 @@ while true; do
         5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs 2>/dev/null; trap - INT ;;
         6) check_for_updates; read -p "Enter..." ;;
         7) clear_logs; read -p "Enter..." ;;
-        8) echo "Exiting. Engines remain active in background."; exit 0 ;;
-        9)
+        8) configure_credentials_menu ;;
+        9) echo "Exiting. Engines remain active in background."; exit 0 ;;
+        10)
             echo -e "${RED}⚠️  WARNING: This will delete all virtual environments and browser caches.${NC}"
             read -p "Are you sure? (y/n): " confirm
             if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then

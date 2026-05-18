@@ -1,3 +1,22 @@
+## [2026-05-18] Credentials Auto-Creation & Interactive Configuration Center
+Files changed:
+- control.sh
+Reason:
+Implement automated workspace credentials decoding from `.env` during Option 1 ("Init Workspace") and introduce an interactive credentials configuration dashboard.
+Changes:
+1. **Automated Workspace Credentials Integration**:
+   - Refactored option `1) Init Workspace (Venv + Browsers + Credentials)` to automatically recreate and decode credentials JSON files (`TypeA.json`, `TypeB.json`, `TypeC.json`) directly from the `.env` base64 variables without requiring interactive prompts.
+   - Refactored `auto_create_credentials_explicit` to support a `force` parameter to allow automated non-interactive overwrites when setting up the workspace.
+2. **Manual "Configure Credentials" Dashboard**:
+   - Added option `8) Configure Credentials` as a manual diagnostic/configuration screen showing whether JSON files and `.env` variables exist for all engines.
+   - Includes sub-menu options to trigger manual base64 recreation (with conflict prompt) or manually input raw service account JSON keys.
+3. **Cross-Platform Compatibility Upgrade**:
+   - Replaced Bash-4-specific `${var^^}` upper-case parameter expansions with POSIX-standard `tr` translation (`tr '[:lower:]' '[:upper:]'`). This fixes all syntax and "bad substitution" errors under standard macOS Bash 3.2 while maintaining absolute reliability on Linux/Ubuntu.
+   - Enforced secure file permissions (`chmod 600`) on all auto-generated and manually pasted JSON files.
+Related tests:
+- Syntax checked `control.sh` successfully with `bash -n`.
+- Verified decoding logic and JSON format validation of all `.env` credentials using a custom scratch test script.
+
 ## [2026-05-18] Phase 2 Fixes, Bot Cleanup, Column S Hashtags, Log Truncation, & Type C Column Mapping
 Files changed:
 - TypeA/main.py
