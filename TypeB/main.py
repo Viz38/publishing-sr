@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from camoufox.async_api import AsyncCamoufox
+from browserforge.fingerprints import Screen
 import gspread_asyncio
 from oauth2client.service_account import ServiceAccountCredentials
 from bs4 import BeautifulSoup
@@ -238,9 +239,20 @@ class TypeBPipeline:
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                # Optimize: Only fetch from start_row onwards
                 all_rows = await ws.get_values(f"A{self.start_row}:Z")
-                data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip() and r[1].strip() not in ["TypeA", "TypeB", "TypeC"]]
+                data_rows = []
+                for i, r in enumerate(all_rows):
+                    if len(r) < 2: continue
+                    real_idx = self.start_row + i
+                    # Detect if row is a header or engine label
+                    if r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                        # Shifted sheet detection: Domain is in index 2
+                        if len(r) > 2 and "." in r[2] and " " not in r[2].strip():
+                            data_rows.append((real_idx, r))
+                    elif "." in r[1] and " " not in r[1].strip():
+                        # Standard sheet detection: Domain is in index 1
+                        data_rows.append((real_idx, r))
+                
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
@@ -248,10 +260,27 @@ class TypeBPipeline:
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
-        h_map = {
-            "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
-            "skip": 6, "sd": 8, "ld": 9, "feed_id": 15
-        }
+        # Determine mapping based on the first data row
+        if data_rows:
+            _, first_row = data_rows[0]
+            if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                # Shifted mapping (Columns shifted right by 1)
+                h_map = {
+                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
+                    "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 21,
+                    "r1": "J", "r2": "T", "r3": "U" # Shifted: J-T, U-W
+                }
+                pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
+            else:
+                # Standard mapping
+                h_map = {
+                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
+                    "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15,
+                    "r1": "H", "r2": "S", "r3": "T" # Standard: H-S, T-V
+                }
+                pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
+        else:
+            h_map = {}
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
@@ -277,7 +306,7 @@ class TypeBPipeline:
         paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_values("A1:T50")) if any(r)]
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in enumerate(data_rows, start=self.start_row):
+        for idx, row in data_rows:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 
@@ -297,9 +326,7 @@ class TypeBPipeline:
                             humanize=True,
                             block_webrtc=True,
                             os=profile["os"],
-                            screen_resolution=profile["screen_resolution"],
-                            device_scale_factor=profile["device_scale_factor"],
-                            hardware_concurrency=profile["hardware_concurrency"],
+                            screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
                             i_know_what_im_doing=True
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
@@ -328,14 +355,19 @@ class TypeBPipeline:
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
                     sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
-                    scrap_stat = row[7] if len(row) > 7 else ""
+                    r1_idx = ord(h_map["r1"]) - ord('A')
+                    scrap_stat = row[r1_idx] if len(row) > r1_idx else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
                         res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
                         res = {
                             "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "sd": sd, "ld": ld,
-                            "feed_id": row[15], "feedcheck": row[10], "bm_res": row[11], "bm_name": row[12], "bm_id": row[13],
-                            "hash_status": row[14] if len(row) > 14 else "N/A",
+                            "feedcheck": row[r1_idx + 3] if len(row) > r1_idx + 3 else "", 
+                            "bm_res": row[r1_idx + 4] if len(row) > r1_idx + 4 else "", 
+                            "bm_name": row[r1_idx + 5] if len(row) > r1_idx + 5 else "", 
+                            "bm_id": row[r1_idx + 6] if len(row) > r1_idx + 6 else "",
+                            "hash_status": row[r1_idx + 7] if len(row) > r1_idx + 7 else "N/A",
+                            "feed_id": row[r1_idx + 8] if len(row) > r1_idx + 8 else "", 
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -345,12 +377,18 @@ class TypeBPipeline:
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
 
                 if res["type"] == "success":
+                    hash_stat = res.get("hash_status") or ("Yes" if res.get("hash_removed") else "No")
                     if self.mode != "phase2":
-                        hash_stat = "Yes" if res.get("hash_removed") else "No"
-                        await r_q.put({'range': f"H{idx}:P{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
-                        await r_q.put({'range': f"T{idx}:V{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('think_text', '')}"]]})
-                    else:
-                        hash_stat = res.get("hash_status", "N/A")
+                        r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
+                        r3_end = "W" if r3 == "U" else "V"
+                        # For Type B, the first result range is I:S or J:T
+                        # Wait, the current code has H:P? Let's check mapping.
+                        # H is 7, P is 15.
+                        # If shifted: I (8), Q (16).
+                        # I'll use the h_map letters.
+                        
+                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
+                        await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
@@ -380,14 +418,24 @@ class TypeBPipeline:
                             else:
                                 ms="Assign Failed"
                             fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                        await r_q.put({'range': f"O{idx}:S{idx}", 'values': [[hash_stat, f_id, sdld, bm, fun]]})
+                        
+                        # Column O/P mapping
+                        o_col, s_col = ("P", "T") if h_map["r1"] == "I" else ("O", "S") # Wait, I'll check indices.
+                        # Standard: O is 14, S is 18.
+                        # If r1 is I (8), then O (14) is correct.
+                        # If r1 is J (9), then P (15) is correct.
+                        if h_map["r1"] == "J":
+                            o_col, s_col = "P", "T"
+                        else:
+                            o_col, s_col = "O", "S"
+                        await r_q.put({'range': f"{o_col}{idx}:{s_col}{idx}", 'values': [[hash_stat, f_id, sdld, bm, fun]]})
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
                     reason = res.get('reason', 'Failed')
                     pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                    if self.mode != "phase2":
-                        await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
+                    stat_col = h_map["r1"]
+                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
                 pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")

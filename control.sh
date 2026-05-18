@@ -233,12 +233,30 @@ clear_logs() {
     read -p "Option [1-6]: " log_opt
     case $log_opt in
         1) 
-            rm -f Type*/Logs/*.log Type*/Logs/*.logs
+            for f in Type*/Logs/*.log Type*/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f Type*/Logs/Snapshots/* 2>/dev/null
             > "$LOG_FILE"
             echo -e "${GREEN}✅ All logs cleared.${NC}";;
-        2) rm -f TypeA/Logs/*.log TypeA/Logs/*.logs; echo -e "${GREEN}✅ Type A logs cleared.${NC}";;
-        3) rm -f TypeB/Logs/*.log TypeB/Logs/*.logs; echo -e "${GREEN}✅ Type B logs cleared.${NC}";;
-        4) rm -f TypeC/Logs/*.log TypeC/Logs/*.logs; echo -e "${GREEN}✅ Type C logs cleared.${NC}";;
+        2) 
+            for f in TypeA/Logs/*.log TypeA/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f TypeA/Logs/Snapshots/* 2>/dev/null
+            echo -e "${GREEN}✅ Type A logs cleared.${NC}";;
+        3) 
+            for f in TypeB/Logs/*.log TypeB/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f TypeB/Logs/Snapshots/* 2>/dev/null
+            echo -e "${GREEN}✅ Type B logs cleared.${NC}";;
+        4) 
+            for f in TypeC/Logs/*.log TypeC/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f TypeC/Logs/Snapshots/* 2>/dev/null
+            echo -e "${GREEN}✅ Type C logs cleared.${NC}";;
         5) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
         *) return;;
     esac

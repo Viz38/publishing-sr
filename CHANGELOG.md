@@ -1,4 +1,60 @@
-## [2026-05-14] Advanced Stealth & Architectural Refactor (A/B/C Engines)
+## [2026-05-18] Phase 2 Fixes, Bot Cleanup, Column S Hashtags, Log Truncation, & Type C Column Mapping
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- control.sh
+- handoff.md
+Reason:
+Resolve silent Phase 2 failures by correcting Script Run Status index checks and variable scopes, and implement bot edit cleanup logic.
+Changes:
+1. **Critical Phase 2 Fixes**: Resolved major bugs where Phase 2 runs would silently fail or crash:
+   - *Script Run Status & Relative Field Indexing*: Fixed the incorrect hardcoded offsets (which checked the wrong columns like `SD` and caused false `"Missing Phase 1 inputs"` failures). We resolved this by anchoring all Phase 2 field lookups relatively to `r1_idx = ord(h_map["r1"]) - ord('A')` (the static start column index of Stage 1 outputs). This guarantees that Phase 2 will always read the exact columns that Stage 1 wrote for both standard and shifted layouts, eliminating shifted layout off-by-one errors completely.
+   - *Scope / UnboundLocalError Resolution*: Fixed scope crashes in `TypeC` (where `r1` was undefined during Phase 2 success write-back) and `TypeB` (where `hash_stat` was undefined during Phase 2). Both are now defined in global worker scope.
+   - *Visible Failure Reporting*: Enforced failure status reporting back to the sheets under Phase 2 instead of skipping write-back silently.
+2. **Type C Bot Cleanup & Status Updates**: Restored the legacy bot cleanup feature. It now dynamically checks a domain's edit history (`/data/edithistory/edits/DOMAIN_PROFILE/{DID}`) and clears `foundedYear`/`companyLocation` if they were edited by `publish.edits@tracxn.com`. It also updates the profile status to `"PUBLISHED"` as the final write step in Phase 2/Full processing.
+3. **Type A Column S Filtering**: Filtered out input hashtags and printed only newly added hashtags (`bu_llm_sd_ld, bu_Internal_SRprocess_TypeA`) to Column S (Output SF).
+4. **Log Truncation Fix**: Updated `clear_logs` in `control.sh` to truncate files (`>`) rather than using `rm -f`, preserving file descriptors and keeping logging active.
+5. **Type C Column Realignment**: Configured standard layout results to start in Column H (contiguous to Q) and implemented relative mathematical offsets (`chr(ord(r1) + X)`) to dynamically adjust subsequent columns for both standard (H to Q) and shifted (I to R) layouts.
+6. **Type C Phase 1 Feed ID Write-back**: Added logic to write the Feed ID to Column K (Standard) / Column L (Shifted) during Phase 1 processing, ensuring alignment with Types A and B behavior.
+Related tests:
+- Manual log clearing validation (Verified file truncation does not unlink files).
+- Dry-run validation of Type A and Type C write-backs (Confirmed correct column offsets and Phase 1 Feed ID output).
+- Compiled code checks (Zero syntax errors across all modified main scripts).
+
+## [2026-05-15] Dynamic Column Mapping & Environment Repair
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- .venv (Repaired)
+Reason:
+Resolved critical failures caused by virtual environment corruption and inconsistent Google Sheet structures (shifted columns).
+Changes:
+1. **Environment Restoration**: Forcibly re-installed `aiohttp` and `pip` in the virtual environment to resolve `AttributeError: module 'aiohttp' has no attribute 'ClientSession'`.
+2. **Dynamic Mapping**: Implemented an automated mapping detector in all pipelines. It now detects if a sheet has an extra "Date/Engine Type" prefix (Shifted) or uses the Standard layout, adjusting indices for domain extraction and write-backs dynamically.
+3. **Accurate Row Indexing**: Fixed a bug where filtered rows caused row index misalignment during Google Sheets write-backs. The engine now tracks the original row index for every data point.
+4. **Resilient Write-Backs**: Updated `sheet_writer` logic to use dynamic column letters based on the detected mapping (e.g., shifting I-T to J-U for Type A sheets).
+Related tests:
+- Manual Sheet Inspection (A1:Z10 verification for A and B)
+- Live Type A trigger (Confirmed "Detected SHIFTED column mapping" and successful initialization)
+
+## [2026-05-15] Camoufox Pipeline Stabilization & Argument Fix
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Fixed critical "unexpected keyword argument 'screen_resolution'" crash loop in AsyncCamoufox browser launch.
+Changes:
+1. **Argument Alignment**: Updated `AsyncCamoufox` calls to use the correct `screen` argument (expecting a `browserforge.fingerprints.Screen` object) instead of the unsupported `screen_resolution` keyword.
+2. **Fingerprint Precision**: Imported `Screen` from `browserforge.fingerprints` to pass explicit resolution constraints to the camoufox fingerprint generator.
+3. **Fingerprint Cleanup**: Removed `device_scale_factor` and `hardware_concurrency` from the `launch` arguments as they are not supported in the current `camoufox` version and were causing runtime errors.
+4. **Domain Filter Expansion**: Updated the domain filter to include "Type A", "Type B", and "Type C" (with spaces) to prevent header rows from being processed as valid domains.
+Related tests:
+- scratch/test_camoufox.py (Verified successful browser launch with Screen object)
+- Live Type A pipeline verification (Confirmed engine no longer crashes and enters scraping loop)
+
 Files changed:
 - sr_common/stealth.py [NEW]
 - sr_common/fetcher.py [NEW]
@@ -78,6 +134,17 @@ Reason:
 Ensured that the company name from the sheet is written to the Tracxn `domain-profile` entity during the automated publishing process for Type C.
 Key Fixes:
 - **API Payload Update**: Added the `companyName` field to the `domain-profile` PUT request payload in the Type C pipeline.
+
+## [2026-05-15] Pipeline Stabilization and Token Integration
+Files changed:
+- .env
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Finalized stabilization of Type A, B, and C pipelines with actual production sheet IDs. Implemented dynamic column detection and relative indexing for Phase 2 robustness. Standardized token tracking columns and enforced numeric-only formatting for Thinking Tokens. Fixed environment-level corruption (uvicorn/typing_extensions).
+Related tests:
+N/A (Live sheet verification)
 
 ## [2026-05-12] Fetch Hardening: Minimum Content Length & Stricter Validation
 Files changed:

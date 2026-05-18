@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from camoufox.async_api import AsyncCamoufox
+from browserforge.fingerprints import Screen
 import gspread_asyncio
 from oauth2client.service_account import ServiceAccountCredentials
 from bs4 import BeautifulSoup
@@ -205,9 +206,20 @@ class TypeCPipeline:
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                # Optimize: Only fetch from start_row onwards
                 all_rows = await ws.get_values(f"A{self.start_row}:Z")
-                data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip()]
+                data_rows = []
+                for i, r in enumerate(all_rows):
+                    if len(r) < 2: continue
+                    real_idx = self.start_row + i
+                    # Detect if row is a header or engine label
+                    if r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                        # Shifted sheet detection: Domain is in index 2
+                        if len(r) > 2 and "." in r[2] and " " not in r[2].strip():
+                            data_rows.append((real_idx, r))
+                    elif "." in r[1] and " " not in r[1].strip():
+                        # Standard sheet detection: Domain is in index 1
+                        data_rows.append((real_idx, r))
+                
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
@@ -216,10 +228,27 @@ class TypeCPipeline:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
         
-        h_map = {
-            "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
-            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
-        }
+        # Determine mapping based on the first data row
+        if data_rows:
+            _, first_row = data_rows[0]
+            if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                # Shifted mapping
+                h_map = {
+                    "domain": 2, "dp_id": 3, "funnel_name": 4, "funnel_id": 5, "tags": 6, "company_name": 7,
+                    "skip": 8, "scrap_stat": 8, "sd": 9, "ld": 10, "feed_id": 11,
+                    "r1": "I", "r2": "N", "r3": "P" # Shifted: I-N, P-R
+                }
+                pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
+            else:
+                # Standard mapping
+                h_map = {
+                    "domain": 1, "dp_id": 2, "funnel_name": 3, "funnel_id": 4, "tags": 5, "company_name": 6,
+                    "skip": 7, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 10,
+                    "r1": "H", "r2": "M", "r3": "O" # Standard: H-M, O-Q
+                }
+                pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
+        else:
+            h_map = {}
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
@@ -227,8 +256,7 @@ class TypeCPipeline:
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_all_values())}
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in enumerate(data_rows, start=self.start_row):
-            # No explicit skip column in Type C currently
+        for idx, row in data_rows:
             await work_queue.put((idx, row))
 
         cache_manager = GeminiCacheManager(settings.TYPEC_GEMINI_API_KEY)
@@ -249,9 +277,7 @@ class TypeCPipeline:
                             humanize=True,
                             block_webrtc=True,
                             os=profile["os"],
-                            screen_resolution=profile["screen_resolution"],
-                            device_scale_factor=profile["device_scale_factor"],
-                            hardware_concurrency=profile["hardware_concurrency"],
+                            screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
                             i_know_what_im_doing=True
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
@@ -286,13 +312,16 @@ class TypeCPipeline:
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
                     sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
-                    scrap_stat = row[7] if len(row) > 7 else ""
+                    r1_idx = ord(h_map["r1"]) - ord('A')
+                    scrap_stat = row[r1_idx] if len(row) > r1_idx else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
                         res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
                         res = {
                             "type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id,
-                            "funnel_name": row[h_map["funnel_name"]], "company_name": row[h_map["company_name"]],
+                            "funnel_name": row[h_map["funnel_name"]] if len(row) > h_map["funnel_name"] else "", 
+                            "company_name": row[h_map["company_name"]] if len(row) > h_map["company_name"] else "",
+                            "feed_id": row[r1_idx + 3] if len(row) > r1_idx + 3 else "",
                             "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -302,9 +331,23 @@ class TypeCPipeline:
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
                 
                 if res["type"] == "success":
+                    r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                     if self.mode != "phase2":
-                        await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
-                        await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('thinking_text', '')}"]]})
+                        r3_end = "P" if r3 == "N" else "O" # wait, O:Q (3) or N:P (3)
+                        r2_letter = chr(ord(r1) + 2) # H->J, I->K
+                        await r_q.put({'range': f"{r1}{idx}:{r2_letter}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
+                        
+                        r3_end_letter = chr(ord(r3) + 2) # O->Q, N->P? No, N->P is index 13-15?
+                        # O is 14, Q is 16. (3 columns)
+                        # N is 13, P is 15. (3 columns)
+                        await r_q.put({'range': f"{r3}{idx}:{r3_end_letter}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
+                        
+                        if self.mode == "phase1":
+                            funnel_name = res.get("funnel_name") or ""
+                            feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
+                            feed_id = f_ids.get(feed, "")
+                            k_col = chr(ord(r1) + 3)
+                            await r_q.put({'range': f"{k_col}{idx}", 'values': [[feed_id]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
@@ -313,12 +356,50 @@ class TypeCPipeline:
                         feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
                         feed_id = f_ids.get(feed, "")
                         
+                        # 1. Fetch edit history to detect publish.edits@tracxn.com edits for foundedYear & companyLocation
+                        data_map = {"foundedYear": "No", "companyLocation": "No"}
+                        try:
+                            eh_status, eh_res = await call_tracxn_api(
+                                session, 
+                                f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{res['dp_id']}", 
+                                tracxn_limiter, 
+                                method="get", 
+                                headers=HEADERS
+                            )
+                            if eh_status == 200 and isinstance(eh_res, list):
+                                for item in eh_res:
+                                    a_name = item.get("attributeName")
+                                    cred_by = item.get("createdBy")
+                                    if a_name in data_map:
+                                        data_map[a_name] = cred_by
+                        except Exception as eh_err:
+                            pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                        
+                        # 2. Build the domain-profile update payload with PUBLISHED status
+                        dp_payload = {
+                            "id": res["dp_id"],
+                            "companyName": {"value": res["company_name"]},
+                            "description": {"value": res["ld"]},
+                            "shortDescription": {"value": res["sd"]},
+                            "keywords": {"value": {"HASHTAGS": tags}},
+                            "publishingDepth": {"value": "Pub 2 - Partial"},
+                            "status": {"value": "PUBLISHED"}
+                        }
+                        
+                        # Apply Bot Cleanup: Clear if authored by publish.edits@tracxn.com
+                        if data_map.get("foundedYear") == "publish.edits@tracxn.com":
+                            dp_payload["foundedYear"] = {"value": None}
+                            pipeline_logger.info(f"BOT CLEANUP: Clearing foundedYear for {domain}")
+                        if data_map.get("companyLocation") == "publish.edits@tracxn.com":
+                            dp_payload["companyLocation"] = {"value": None}
+                            pipeline_logger.info(f"BOT CLEANUP: Clearing companyLocation for {domain}")
+                            
                         f_stat, sdld, fun = "N/A", "N/A", "N/A"
                         if feed_id:
                             s_f, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
                             f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
                             
-                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data={"id": res["dp_id"], "companyName": {"value": res["company_name"]}, "description": {"value": res["ld"]}, "shortDescription": {"value": res["sd"]}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}, headers=HEADERS)
+                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=dp_payload, headers=HEADERS)
                             As,_ =  await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"},"comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200,201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -327,7 +408,7 @@ class TypeCPipeline:
                             sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                             fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         else:
-                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data={"id": res["dp_id"], "companyName": {"value": res["company_name"]}, "description": {"value": res["ld"]}, "shortDescription": {"value": res["sd"]}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}, headers=HEADERS)
+                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=dp_payload, headers=HEADERS)
                             As,_ =  await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"},"comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200,201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["591d37b884ae06633a652496"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -336,14 +417,17 @@ class TypeCPipeline:
                             sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                             fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         
-                        await r_q.put({'range': f"K{idx}:N{idx}", 'values': [[feed_id, sdld, f_stat, fun]]})
+                        # Dynamic Tracxn status columns based on results start column r1
+                        k_col = chr(ord(r1) + 3)
+                        n_col = chr(ord(r1) + 6)
+                        await r_q.put({'range': f"{k_col}{idx}:{n_col}{idx}", 'values': [[feed_id, sdld, f_stat, fun]]})
                         await r_q.put({'type': 'progress', 'is_success': sdld in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
                     reason = res.get('reason', 'Failed')
                     pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                    if self.mode != "phase2":
-                        await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
+                    stat_col = h_map["r1"]
+                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
                 pipeline_logger.error(f"FATAL WORKER ERROR for {row[h_map['domain']] if row else 'Unknown'}: {e}")

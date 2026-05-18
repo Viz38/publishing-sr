@@ -1,6 +1,7 @@
 import asyncio
 import aiohttp
 from camoufox.async_api import AsyncCamoufox
+from browserforge.fingerprints import Screen
 import gspread_asyncio
 from oauth2client.service_account import ServiceAccountCredentials
 from bs4 import BeautifulSoup
@@ -238,6 +239,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     llm_calls += 1
     res_bm1 = res_bm1_obj.text
+    pipeline_logger.debug(f"PROCESS: BM1 Response generated ({len(res_bm1)} chars)")
     in3, out3, think3 = res_bm1_obj.prompt_tokens, res_bm1_obj.candidate_tokens, res_bm1_obj.thinking_tokens
     if res_bm1_obj.thinking_text: think_text += f"BM1:\n{res_bm1_obj.thinking_text}\n"
     tokens["in"] += in3; tokens["out"] += out3; tokens["think"] += think3
@@ -259,12 +261,14 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
                 cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
                 res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id)
+                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
             else:
                 bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
                 res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
             
             llm_calls += 1
             res_bm2 = res_bm2_obj.text
+            pipeline_logger.debug(f"PROCESS: BM2 Response generated ({len(res_bm2)} chars)")
             in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
             if res_bm2_obj.thinking_text: think_text += f"BM2:\n{res_bm2_obj.thinking_text}\n"
             tokens["in"] += in4; tokens["out"] += out4; tokens["think"] += think4
@@ -275,7 +279,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     pipeline_logger.info(f"PROCESS SUCCESS: {domain} | BM: {bm_name_final}")
     return {
         "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
-        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1_raw[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000] if 'bm_p2' in locals() else "", "bmr2": res_bm2[:40000] if 'res_bm2' in locals() else "", "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": ", ".join(hashtags), "feed_id": f_id,
+        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1_raw[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000] if 'bm_p2' in locals() else "", "bmr2": res_bm2[:40000] if 'res_bm2' in locals() else "", "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": "bu_llm_sd_ld, bu_Internal_SRprocess_TypeA", "feed_id": f_id,
         "tokens": tokens, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
         "body_len": len(combined)
@@ -302,9 +306,20 @@ class TypeAPipeline:
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                # Optimize: Only fetch from start_row onwards
                 all_rows = await ws.get_values(f"A{self.start_row}:Z")
-                data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip()]
+                data_rows = []
+                for i, r in enumerate(all_rows):
+                    if len(r) < 2: continue
+                    real_idx = self.start_row + i
+                    # Detect if row is a header or engine label
+                    if r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                        # Shifted sheet detection: Domain is in index 2
+                        if len(r) > 2 and "." in r[2] and " " not in r[2].strip():
+                            data_rows.append((real_idx, r))
+                    elif "." in r[1] and " " not in r[1].strip():
+                        # Standard sheet detection: Domain is in index 1
+                        data_rows.append((real_idx, r))
+                
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
@@ -312,10 +327,28 @@ class TypeAPipeline:
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
-        h_map = {
-            "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
-            "skip": 7, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19
-        }
+        
+        # Determine mapping based on the first data row
+        if data_rows:
+            _, first_row = data_rows[0]
+            if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                # Shifted mapping (Type A style - Columns shifted right by 1)
+                h_map = {
+                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
+                    "skip": 8, "scrap_stat": 9, "sd": 10, "ld1": 11, "ld2": 12, "feed_id": 20,
+                    "r1": "J", "r2": "U", "r3": "Y" # Standard Ranges: J-U, Y-AA
+                }
+                pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
+            else:
+                # Standard mapping
+                h_map = {
+                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
+                    "skip": 7, "scrap_stat": 8, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19,
+                    "r1": "I", "r2": "T", "r3": "X" # Standard Ranges: I-T, X-Z
+                }
+                pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
+        else:
+            h_map = {}
         
         pipeline_logger.info("Connecting to Master Sheet...")
         m_sheet = await gc.open_by_key(self.config["MASTER_SHEET_ID"])
@@ -354,7 +387,7 @@ class TypeAPipeline:
         paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_values("A1:T50")) if any(r)]
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in enumerate(data_rows, start=self.start_row):
+        for idx, row in data_rows:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 
@@ -374,9 +407,7 @@ class TypeAPipeline:
                             humanize=True,
                             block_webrtc=True,
                             os=profile["os"],
-                            screen_resolution=profile["screen_resolution"],
-                            device_scale_factor=profile["device_scale_factor"],
-                            hardware_concurrency=profile["hardware_concurrency"],
+                            screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
                             i_know_what_im_doing=True
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
@@ -407,14 +438,22 @@ class TypeAPipeline:
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
                     sd, ld1, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld1"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
-                    scrap_stat = row[h_map["domain"] + 7] if len(row) > 8 else ""
+                    r1_idx = ord(h_map["r1"]) - ord('A')
+                    scrap_stat = row[r1_idx] if len(row) > r1_idx else ""
                     if not (sd and ld1 and dp_id and funnel_id and scrap_stat.startswith("Yes")):
                         res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
                         res = {
                             "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "sd": sd, "ld1": ld1,
-                            "ld2": row[11], "bmp1": row[12], "bmr1": row[13], "bmp2": row[14], "bmr2": row[15],
-                            "bm_name": row[16], "bm_id": row[17], "sf": row[18], "feed_id": row[19],
+                            "ld2": row[r1_idx + 3] if len(row) > r1_idx + 3 else "", 
+                            "bmp1": row[r1_idx + 4] if len(row) > r1_idx + 4 else "", 
+                            "bmr1": row[r1_idx + 5] if len(row) > r1_idx + 5 else "", 
+                            "bmp2": row[r1_idx + 6] if len(row) > r1_idx + 6 else "", 
+                            "bmr2": row[r1_idx + 7] if len(row) > r1_idx + 7 else "",
+                            "bm_name": row[r1_idx + 8] if len(row) > r1_idx + 8 else "", 
+                            "bm_id": row[r1_idx + 9] if len(row) > r1_idx + 9 else "", 
+                            "sf": row[r1_idx + 10] if len(row) > r1_idx + 10 else "", 
+                            "feed_id": row[r1_idx + 11] if len(row) > r1_idx + 11 else "",
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -425,8 +464,10 @@ class TypeAPipeline:
 
                 if res["type"] == "success":
                     if self.mode != "phase2":
-                        await r_q.put({'range': f"I{idx}:T{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
-                        await r_q.put({'range': f"X{idx}:Z{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], f"Tokens: {res['tokens'].get('think', 0)}\n\n{res.get('think_text', '')}"]]})
+                        r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
+                        r3_end = "AA" if r3 == "Y" else "Z"
+                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
+                        await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     
                     if self.mode != "phase1":
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
@@ -439,16 +480,23 @@ class TypeAPipeline:
                         s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
                         bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
                         
-                        ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                        f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
+                        ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
                         fun = "Done" if ms in (200, 201) else ("Duplicate/Already Moved" if ms == 422 else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                        await r_q.put({'range': f"U{idx}:W{idx}", 'values': [[edits, bm_up, fun]]})
+                        
+                        # Find Column U/V mapping
+                        if h_map["r1"] == "J":
+                            u_col, w_col = "V", "X"
+                        else:
+                            u_col, w_col = "U", "W"
+                        await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [[edits, bm_up, fun]]})
                         await r_q.put({'type': 'progress', 'is_success': edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:
                     reason = res.get('reason', 'Failed')
                     pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                    if self.mode != "phase2":
-                        await r_q.put({'range': f"I{idx}", 'values': [[reason]]})
+                    stat_col = h_map["r1"]
+                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
                 pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
