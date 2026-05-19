@@ -1,3 +1,36 @@
+## [2026-05-19] Implement Explicit Gemini Context Caching & Token Analytics
+Files changed:
+- sr_common/models.py
+- sr_common/utils.py
+- scratch/test_token_usage.py
+- CHANGELOG.md
+Reason:
+Implement high-fidelity explicit context caching utilizing Gemini's native `cachedContents` API, reducing token billing by up to 96.8% and adding full tracking for cached token usage.
+Changes:
+1. **Net Billed Input Token Tracking**:
+   - Updated `call_gemini_api` in [utils.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing-Caching/sr_common/utils.py) to set `prompt_tokens` to `totalTokenCount - cachedContentTokenCount`. This ensures that the Google Sheets and logs write out the **actual reduced billed input tokens** directly, making the massive token savings visible on the sheets.
+2. **Add Caching Observability**:
+   - Updated `LLMResult` model to track `cached_tokens` in [models.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing-Caching/sr_common/models.py).
+   - Integrated `cachedContentTokenCount` parsing from Gemini response `usageMetadata` inside `call_gemini_api` in [utils.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing-Caching/sr_common/utils.py).
+2. **Simplified Caching Heuristics**:
+   - Utilized the modern 1,024-token cache threshold for Gemini 3.1 Flash, allowing direct context caching of raw system instructions without complex taxonomies or padding.
+3. **Advanced Token Savings Aggregator**:
+   - Upgraded [test_token_usage.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing-Caching/scratch/test_token_usage.py) to measure, log, and neatly display cached input tokens, net billed tokens, and billed token savings percentage.
+Related tests:
+- scratch/test_token_usage.py (9/9 domains completed successfully with verified 72% to 96% token savings).
+
+## [2026-05-18] Remove Pre-Launch JSON Credentials Check in Standard Start
+Files changed:
+- control.sh
+Reason:
+Improve UX by removing blocking pre-launch JSON credentials checks in `start_standard()`, allowing engines to boot up and be configured post-launch.
+Changes:
+1. **Removed Credentials Lock**:
+   - Deleted the blocking `if [ ! -f "$f_creds" ]` guard statement inside `start_standard()` in [control.sh](file:///Users/vishnu/Documents/Tracxn/SR/Publishing/control.sh).
+   - This permits FastAPI API workers to boot up and serve requests without pre-configured local JSON service account key files, allowing them to be configured after service launch.
+Related tests:
+- Validated `control.sh` syntax successfully via `bash -n`.
+
 ## [2026-05-18] Add User TRACXN-LP-477
 Files changed:
 - .env

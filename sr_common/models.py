@@ -18,6 +18,7 @@ class LLMResult(BaseModel):
     prompt_tokens: int = 0
     candidate_tokens: int = 0
     thinking_tokens: int = 0
+    cached_tokens: int = 0
     thinking_text: str = ""
     success: bool = True
 

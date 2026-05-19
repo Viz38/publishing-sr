@@ -585,12 +585,6 @@ start_standard() {
         
         restore_credentials "$f_name" "$f_path"
         
-        if [ ! -f "$f_creds" ]; then
-            local upper_name=$(echo "$f_name" | tr '[:lower:]' '[:upper:]')
-            echo -e "${RED}❌ $f_name: Credentials missing ($f_name.json)!${NC}"
-            echo -e "${YELLOW}   Please manually upload the service account key to $f_creds or add ${upper_name}_CREDENTIALS_B64 to .env${NC}"
-            continue
-        fi
         
         echo -e "   ▶ Launching $f_label..."
         mkdir -p "$f_path/Logs"

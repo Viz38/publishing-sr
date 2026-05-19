@@ -1,0 +1,2153 @@
+Theme,Prompt
+Gemini Prompt SD LD,"Below is the extracted website content for a company:
+
+XX
+
+Your task:  
+Generate a professional Short Description (exactly 10 words) and a Long Description (maximum 200 words) that strictly follow all instructions below. The output must be clear, factual, specific, and professional — with no marketing fluff.
+
+Important:
+
+If the website is “Launching Soon,” under construction, not publicly accessible, or has insufficient content to describe the company’s business offerings, do not generate any Short Description or Long Description. Instead, output exactly:
+
+Content insufficient for generating Short Description or Long Description
+
+-------------------------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT — DO NOT CHANGE)
+
+Your output must be exactly in this format:
+
+Short Description: [Your 10-word line here — DO NOT end with a period]
+
+Long Description: [The exact same 10-word line as the first line, but in the Long Description it MUST end with a period. Then start the next sentence on a new line or after the period.]
+
+- The Short Description must be the first line of the Long Description — word for word.
+- The Short Description must be exactly 10 words — not 9, not 11.
+- The Short Description must NOT end with a period.
+- The Long Description version of that line MUST end with a period.
+- Do NOT add extra headings, extra lines, or any different formatting.
+- Do NOT use double spaces. Always check for accidental extra spaces before submitting.
+
+-------------------------------------------------------------------------------
+
+GENERAL RULES
+
+- Write in third person only.
+- Keep it factual and professional — no vague filler or marketing language.
+- Do NOT include the company name anywhere in either description.
+- Do NOT mention any location, geography, or place names.
+- Do NOT include any numbers or data points (e.g., “45-day delivery”, “1000 employees”).
+- Do NOT use double spaces. Always check for accidental extra spaces before submitting.
+- Ensure all words use standard English spellings only, avoiding accented, regional, or non-English forms (e.g., use “cafe” not “café”, use “resume” not “résumé”).
+
+-------------------------------------------------------------------------------
+
+SHORT DESCRIPTION RULES
+
+- Must answer clearly: “What exactly does this company offer?” — be specific and factual.
+- Must start with strong, factual phrasing such as:
+  - “Provider of…”
+  - “Developer of…”
+  - “Manufacturer of…”
+  - “Operator of…”
+  - “Network of…”
+  - ""Retailer of…”
+  - ""Chains providing....""
+- “Chains providing…” is to be used ONLY when:
+  - The business clearly operates multiple physical outlets, such as:
+  - Restaurant Chains
+  - Training Center Chains
+  - Salon Chains
+  - Repair service Chains
+  - Clinical Laboratory Chains
+  - Hospital Chains
+  - Clinic Chains
+  - Fitness and Wellness Chains
+  - Food Service Chains
+  - Early Education & Child Care Chains
+  - Test Preparation Chains
+  - Continuing Education Chains
+  - Supply Chain Services
+  - Retail Chains
+  - The website content explicitly indicates that the company runs multiple in-person locations.
+- Do NOT start with: “It”, “The Company”, or “The Platform”.
+- Must describe the actual offering or business model — no generic statements.
+- Do NOT use any marketing jargon, including but not limited to:
+  - Global leader
+  - Leading provider
+  - Award-winning
+  - Innovative
+  - Cutting-edge
+  - Pioneering
+  - Best in class
+  - Top-tier
+  - Ultimate
+  - Outstanding
+  - Unmatched
+  - Unparalleled
+  - Exceptional
+  - State-of-the-art
+  - Forefront of innovation
+  - Gold standard
+  - Highest quality
+  - Most trusted
+  - Premium
+  - Diverse
+  - Comprehensive
+  - 24/7 service
+  - Number one
+  - Top-notch
+  - World-class
+  - Expert
+  - Specialized
+  - Authoritative
+  - Superior
+  - Elite
+  - First-rate
+  - Emerging
+  - Groundbreaking
+- Do NOT use vague filler phrases such as:
+  - “Range of services”
+  - “Free services”
+  - “Tailored solutions”
+  - “Diverse offerings”
+  - “Up-to-date information”
+  - “Timely updates”
+  - “Transparent results”
+  - “Easy navigation”
+- Do NOT mention clients, user base, acquisitions, or partnerships.
+- Must NOT end with a period in the Short Description only.
+- If the company is offering solutions in multiple places or geo-locations (Only if they are like a chain of institutions), make sure to start with ""Chains providing...."".
+- Companies that are in manufacturing business, make sure that the SD start with “Manufacturer of…”.
+
+Example of what NOT to do:  
+Short Description: Network facilitating shared use of transportation and mobility resources.
+
+Correct:  
+Short Description: Network facilitating shared use of transportation and mobility resources
+
+-------------------------------------------------------------------------------
+
+LONG DESCRIPTION RULES
+
+- The first line must be the exact same as the Short Description — word for word — but it MUST end with a period in the Long Description.
+- Must be a maximum of 200 words.
+- Must be written in third person only.
+- Must describe only what the company does — not how it operates internally, its mission, values, or history.
+- Do NOT include:
+  - Any numbers or data points.
+  - The company name.
+  - Location or place names.
+  - Client names, user based details, partnerships, or acquisitions.
+  - Sentences about internal culture, ethics, mission, vision, or business philosophy.
+  - Calls to action or contact information such as “Contact us” or “Visit our website”.
+- Do NOT start with “It”.
+- Do NOT use any marketing jargon (same list as Short Description).
+- Do NOT use double spaces.
+
+-------------------------------------------------------------------------------
+
+FINAL CHECKLIST BEFORE SUBMITTING
+
+- Short Description is exactly 10 words.
+- Short Description does NOT end with a period.
+- Long Description starts with the exact same 10-word Short Description, and in the Long Description it DOES end with a period.
+- Then the next sentence starts as normal.
+- No company name is included anywhere.
+- No numbers, locations, marketing fluff, or vague filler.
+- No double spaces.
+- The output follows the exact format shown below.
+
+-------------------------------------------------------------------------------
+
+EXAMPLE OUTPUT
+
+Short Description: High-performance VL3 light sport aircraft manufacturer
+
+Long Description: High-performance VL3 light sport aircraft manufacturer. Known for its forgiving flight characteristics, impressive speed, and remarkable short field landing capabilities, the VL3 is suitable for both training and long-distance travel. JMB Aircraft offers support including service centers and participation in major aviation exhibitions globally. Their passion for aviation is reflected in their commitment to producing high-quality aircraft.
+
+-------------------------------------------------------------------------------
+
+IMPORTANT REMINDER
+
+- Short Description must NEVER have a period (.) at the end.
+- Long Description must start with the exact same words, but that line MUST end with a period.
+- Stick to this structure exactly. Keep it professional, factual, clear, and specific.
+- Do not skip or change any rule."
+Gemini Prompt LD2,"""Below is the website extraction of a company
+
+XX
+
+Generate a professional short description( in 10 words) and a long description( in 200 words) of the company and return the output strictly in the format 
+
+Short Description: value
+
+Long Description: value
+
+The Short Desription should be the first line of the Long Description. And there should not be a full stop/period at the end of the Short description.
+
+The Long Description should not have data/numbers, example - 45 days delivery, 1000 square yards area, etc. Company Name should not be there in Long Description. Do not include acquisition and client details. The Logn escription should only be specific to what the company business is about.
+You need to add all the relevant keywords whcih are critical to idetnify any industry, whether it is B2B or B2C, if its a tech company or not, SaaS, Software, any social impact from their business model directly, etc. Example - Include keywords like. Cloud Based,cart, login, book now, subsciprtion, pricing, Blockchain, Artifical Intellignece etc. Basically anything whcih can be used to identify the business model of that company and whether it offers single/multiple products or services
+
+For Example :
+
+Short Description : High-performance VL3 light sport aircraft manufacturer
+
+Long Description : High-performance VL3 light sport aircraft manufacturer, a high-performance light sport aircraft.  Known for its forgiving flight characteristics, impressive speed, and remarkable short field landing capabilities, the VL3 is suitable for both training and long-distance travel. JMB Aircraft offers comprehensive support, including service centers and participation in major aviation exhibitions globally.  Their passion for aviation is reflected in their commitment to producing high-quality, innovative aircraft.
+"""
+Gemini Prompt SF,"""""""I Will Provide:
+1. Companys description of its business.
+2. Flags along with their definitions (inclusions exclusions etc.)
+
+Based on the above 2 parameters you have to identify which of the flags can be marked as """"Yes"""" for that company. 
+
+Companny Description:
+
+XX
+
+""""""""""""""""Special Flags and their definitions:
+1. Tech: 
+- Tech includes Digital products/services including apps, software, online platforms, connected devices, etc. (Twitter).
+- High IP products like Biotech drugs, sensors, 3D Printers, robotics, AR VR devices, etc. (Moderna)
+- Inclusions:
+   - Online booking platforms - example - Flight tickets, Bus tickets, Hotel/property/hostel bookings, Food delivery apps, cab bookings etc. Tech flag should be """"Yes""""
+- Exclusions:
+  - Exculde companies/agencies that are providing consulting services or software solutions (example - Oracle, Tata Consultancy services, etc.) (they are non-tech)
+  - Exclude investment firms, Venture capital firms, holiding companies, etc which are also investing in software or tech companies. Tech flag should be """"No"""" here
+
+2. Consumer:
+Must Have Condition:
+- The company's core products or services are directly used by individual end-users for personal, non-business purposes.
+- Companies that offer products or services directly to individual end-users, even if their primary business model is B2B.
+- Do not assume anything here if not clear from the description.
+- Description should answer one simple question - Is the product or service used by end users directly (Direct selling to individuals, not through another business). End user Definition - It should be individuals. Example - Uber cabs - uses Google maps technology from Google. For Google - end user becomes Uber (B2B), but for Uber - end user becomes Inidividuals who use their booking app (B2C). For consumer flag - End user should be individuals (as mentioned in example).
+Inclusions:
+- Companies offering business-to-consumer (B2C) products or services.
+- Peer-to-peer (P2P) platforms facilitating transactions or interactions between individuals.
+- Educational institutions (pre-schools, schools, universities, institutions, day care centers) providing educational services to students.
+- Healthcare providers (hospitals, clinics) offering medical services to patients.
+- Residential real estate platforms and services (apartment listings, home sales, rentals, hostels, hotels, individual property bookings) focused on individual housing needs.
+- Companies whose core product and services are B2B (enterprise) but also serve individuals/ consumers directly
+Exclusions:
+- Companies primarily selling products or services to other businesses.
+- Platforms solely dedicated to business-to-business transactions.
+- Commercial real estate services focused on business spaces.
+- Exclude B2B2C companies as they are not directly dealing with customers. Do not assume the products will be used by individuals directly unless mentioned in the description.
+
+3. Enterprise:
+Must Have Condition:
+-The company's core products or services are designed and marketed to businesses or organizations to improve their operations, efficiency, or profitability.
+Inclusions:
+- Companies offering business-to-business (B2B) products or services.
+- Companies enabling business-to-business-to-consumer (B2B2C) models, where the primary customer is a business.
+- Software and technology solutions for businesses (e.g., CRM, ERP, cloud services).
+- Consulting, professional services, and business support services.
+- Commercial real estate services (co-working spaces, office rentals, commercial property management).
+- Any software or services sold to any business, hospitals, schools, or any other institution, for the purpose of helping those institutions perform their business.
+Exclusions:
+- Companies primarily selling products or services directly to individual consumers for personal use.
+- Any platform that facilitates person to person sales.
+
+4. Marketplace:
+- Must-Have Conditions:
+   - Operates an online platform facilitating direct transactions between buyers and sellers of goods or services, where the platform itself is the primary point of transaction and payment processing
+   - Online transaction facilitation must be core to the company's business model.
+- Inclusions:
+   - E-commerce platforms (e.g., Amazon, Shopify).
+   - Online auction sites (e.g., eBay).
+   - Platforms connecting freelancers with clients (e.g., Upwork, Fiverr).
+   - Platforms facilitating the sale of goods or services between individuals (e.g., Etsy, Airbnb).
+   - Platforms facilitating the sale of digital goods (e.g., software, music, ebooks).
+   - Platforms that process payments online on behalf of multiple sellers, even if they don't directly host the product listings.
+- Exclusions:
+   - Companies primarily selling their own products (even if they occasionally allow third-party sellers).
+   - Companies providing marketing/advertising or directory services (even if they connect buyers and sellers).
+   - Payment processors without a marketplace platform.
+   - Companies facilitating single, one-off online transactions.
+   - Platforms for financial instruments (e.g., stocks, commodities, mutual funds, SIPs, cryptocurrency - like Groww, Zerodha, Binance, coinbase etc.).
+   - Online casinos and gambling platforms
+
+- Marketplace - Strict Rule Update:
+  - Only mark """"Yes"""" if the platform **explicitly facilitates direct transactions between buyers and sellers AND handles payment processing as a core function**.
+  - Platforms that merely **connect users or list services/products** without explicit **transaction/payment processing** should be flagged as """"No"""".
+  - Examples: General job boards, recruitment platforms, listing websites, or directories **do not qualify as Marketplace** unless they explicitly process payments or enable core transactions.
+  - Anything else → No
+  - The platform sells its own products/services directly and does not facilitate transactions between independent buyers and sellers.
+
+  - Payment processing is only for the company’s own offerings, not for third-party transactions.
+
+  - The platform does not enable peer-to-peer transactions or act as a marketplace for multiple sellers.
+
+
+5. SaaS:
+A SaaS company provides access to a software application or a service enabled by software over the internet, primarily through recurring subscriptions. The software/infrastructure is hosted and maintained by the provider, and customers access the service remotely. The core offering is access to and use of the software/service, not the software itself.
+
+SaaS Inclusion (ALL must be substantially met):
+
+ - Recurring subscription revenue (not one-time purchases).
+ - Hosted and maintained by the provider (not customer-managed).
+ - Remote access (web, API, etc.; not primarily downloadable software).
+ - Core offering is a service enabled by software (not just software as a tool).
+ - Scalable infrastructure (multi-tenancy or equivalent).
+
+SaaS Exclusion (ANY applies):
+
+ - Primarily perpetual licenses (traditional software vendor).
+ - Exclude companies or firms offering Infrastructure-as-a-Service (IaaS) and those operating as cloud service providers.
+ - If the company provides a subscription-based platform, classify Software as No instead of Yes.
+ - Manage`d service provider (core offering is IT services).
+ - Hardware vendor.
+ - Primarily open-source code (unless hosted as a service).
+ - Consulting firm (expertise, not software access).
+ - Primarily online education content (unless software is a core component).
+ - Primarily downloadable software.
+ - API-only provider (without a defined service).
+ - Free software (no subscription model for the service).
+ - Data provider (without a service layer built on top of the data).
+-Strict Rule Fix:
+ - Yes only if all must-have conditions are explicitly confirmed:
+ - Recurring subscription revenue explicitly mentioned.
+ - Software/service is hosted and maintained by the provider.
+ - Access is remote (web/API).
+ - Core offering is service enabled by software, not just software itself.
+ - If description doesn’t explicitly mention subscription model + hosted service + remote access, flag No.
+ - Access to our platform is provided as part of our service offering; software access is incidental, not subscription-based SaaS.
+
+ - We do not offer recurring subscription software access; our service is content or consulting driven.
+
+ - No software is hosted or maintained remotely for subscription use; the platform supports service delivery only.
+
+6. Software: 
+Software Flag """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""": A company gets a """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""" if it owns and typically commercializes software as a product.
+Must have:  Ownership of the core software being commercialized (developed, licensed, or sold as a distinct offering).  This is the essential requirement.  Simply using software, even proprietary software internally, is not enough.
+Inclusions:
+- Software Product Companies: Companies whose primary business is creating and selling/licensing software products (e.g., operating systems, applications, databases). Example: Adobe, - Microsoft, Salesforce. They sell or license the software itself.
+- Software Platform Companies: Companies offering platforms (PaaS, SaaS, IaaS) that others use to build on. Example: AWS, Twilio. They own and provide the platform as a service.
+- Companies with Proprietary Software as a Directly Commercialized Core Offering: Companies where custom-developed software is a key product and a significant revenue driver, and is sold or licensed to others.
+- Companies that provide login option in the website that will gives access to a web application or platform (like project management tools, analytics dashboards, SaaS products, etc.) or if the site is the front end for a software product, where users interact with a digital tool or service online.
+ Example: A company that develops specialized design software for architects and sells licenses for it. It cannot just be used internally.
+Exclusions: None, as long as the """"""""""""""""""""""""""""""""Must have"""""""""""""""""""""""""""""""" (ownership and commercialization as a product) is met.
+
+Software Flag """"""""""""""""""""""""""""""""No"""""""""""""""""""""""""""""""": A company gets a """"""""""""""""""""""""""""""""No"""""""""""""""""""""""""""""""" if it doesn't own and/or doesn't commercialize software as a product.
+Must have: Lack of ownership of the core software being used or lack of commercialization of the software as a distinct product.
+Inclusions:
+- Companies primarily using 3rd-party software: Companies relying on software made by others for their operations. Example: A retail store using point-of-sale software.
+- Companies whose core offering is NOT software, even if they use proprietary software internally: Example: A logistics company with route optimization software (if they don't sell/license that software itself). Or a bank with its own internal banking software (if they don't sell that software to other banks).
+- Mobile App-Only Companies: Companies whose sole offering is a mobile app.
+- Social Media Companies: Companies whose core business is social networking, not software as a product.
+- IT Consulting/Services Companies: Companies providing IT consulting, system integration, or custom development for clients, but not selling their own software as a product.
+- Software Resellers: Companies that distribute or implement software made by others.
+- Companies whose primary business is operating an online platform (marketplace, transactional, etc.), even if that platform is built on proprietary software: Example: Uber, Booking.com, Visey. They are selling a service enabled by software, not the software itself.
+-Companies whose primary offering is hardware, even if that hardware incorporates essential embedded software that is not sold separately. Example: A manufacturer of industrial automation systems where the software is integrated into the hardware offering.
+Exclusions: None, as long as the """"""""""""""""""""""""""""""""Must have"""""""""""""""""""""""""""""""" (lack of ownership or lack of commercialization as a product) is met.
+
+-Strict Rule Fix:
+   - Yes only if explicitly mentioned:
+   - Company owns the software (developed/licensed/sold as product).
+   - Software is commercialized as a product (sold or licensed to others).
+   - Do not assume ownership from usage or if the platform/service is enabled by software (that’s SaaS/Tech).
+   - Key check: If they provide a service/platform but don’t sell software itself → No.
+ -The company does not own or commercialize software as a product; software is only used internally to enable services.
+
+ -Our platform is a service delivery tool; we do not sell or license the software itself.
+
+ -The core product is the service provided, not the software enabling it.
+
+7. Tech Hardware: 
+- Companies which develop Hi-Tech hardware products including IoT devices, semiconductors, sensors, IT Infrastructure, drones, robotics, AR VR devices, smart vehicles, consumer electronics etc. (Tesla, SpaceX)
+- Exclude - Companies that manufacture Non digital hardware example - Carbon fibre, etc.
+- Exclude - Companies that themselves do not manufacture Tech/digital Hardware, but provide solutions to other Tech/digital hardware manufacturers.""""""""""""""""
+""""""""""""""""Output Format: Output should be in the format below (strictly adhere to it):
+
+8. Social Impact: 
+Must-Have Conditions:
+- The company must be a for-profit entity.
+- The company's primary business operations must be directly and intentionally aimed at achieving one or more defined social impact objectives.
+- General job search assistance platforms (that help in landing interviews / advancing careers etc.), without a specific focus on marginalized or underserved communities, will be flagged as 'No'.
+- The social impact objectives must align with the following categories:
+     - Access to education (excluding traditional schools/universities), Access to financial services (particularly for underserved populations), Access to power (e.g., renewable energy solutions), Access to healthcare (excluding standard healthcare provider models), Affordable housing, Access to clean water and sanitation, Employment generation (especially for marginalized communities or creation of living-wage jobs), Rural income improvement, Skills development, Agricultural productivity growth, Environmental sustainability (e.g., renewable energy, waste reduction, conservation, ethical sourcing), Community development (e.g., building community centers, supporting local initiatives), Arts and Culture, Human rights, Reduced inequalities, Other demonstrably positive social or environmental impact that aligns with the spirit of this definition.
+Inclusions:
+- Companies that develop innovative technologies or business models to address the defined social impact objectives.
+- Companies that operate market-based solutions to social problems.
+- Companies that create platforms that enable others to create social change.
+- Companies that have a clearly defined and measurable social or environmental mission embedded within their core business model.
+Exclusions:
+- Traditional schools, universities, and academic institutions.
+- Standard healthcare providers (e.g., hospitals, clinics, individual practices) that are not part of a larger for-profit entity with a social impact mission.
+- Companies that engage in philanthropic activities or corporate social responsibility (CSR) initiatives that are separate from their core business operations.
+- Companies that provide general products or services that may incidentally have a positive social effect, but do not have a core social mission.
+- Government run organizations.
+- General Job Boards or Job Listing websites.
+- Companies that participate in activities that are detrimental to society or the environment.
+- Companies with a negative social impact that outweighs the positive impact
+
+9. AI: 
+
+A company is flagged as """"Artificial Intelligence"""" if it develops and deploys proprietary AI, or integrates and leverages third-party AI as a core and essential component of its product/service, adding significant value or differentiation.
+- Must-Have Conditions:
+  1. Development/Integration & Deployment: The company must either develop and deploy proprietary AI, or significantly integrate and leverage third-party AI, and deploy that AI in its products/services.  Simply using readily available AI tools or APIs without significant integration or development is insufficient.
+  2. Core Component: The AI (proprietary or integrated) must be a core and essential part of the product/service offering, not a minor, ancillary, or purely internal feature.  It should be a key selling point, differentiator, or driver of significant value.
+ 
+- Inclusions:
+  1. AI Infrastructure Development: Companies developing foundational Machine Learning libraries, frameworks, and algorithms that enable the creation of AI applications by others.
+  2. AI Applications (Proprietary): Companies building AI-powered products/services based on their own developed AI/ML algorithms, models, or frameworks.
+  3. AI Services (Proprietary): Companies offering services that are significantly enhanced or differentiated by their proprietary AI technology.
+  4. AI Applications/Services (Integrated - Significant Value Add): Companies building products/services by significantly integrating and adding value to third-party AI/ML models or APIs.This includes substantial customization, fine-tuning, development of proprietary algorithms that work in conjunction with the third-party AI, or creation of novel applications of existing AI.  Simply reselling or white-labeling is excluded.
+
+- Exclusions:
+  1. Basic Integration/Utilization (Without Added Value): Companies primarily integrating or utilizing pre-existing AI/ML models or APIs developed by third parties without significant modification, customization, further AI development, or added value.  Examples include using pre-trained models or readily available AI services for common tasks (e.g., basic chatbots, simple language processing, basic image recognition) without adding substantial proprietary value.
+  2. Late AI Integration (Non-Core/Ancillary): Companies incorporating AI as a recent addition to a long-established product/service where AI is not yet a core or differentiating feature.  The AI's impact on the core offering must be substantial.
+  3. Basic Chatbots (Non-Core Customer Service): Companies using AI chatbots solely for basic customer query management where this functionality is not a core offering of the company.  The chatbot must be more than a simple support tool.
+  4. General Service Companies (Non-Tech Focus): Companies whose primary business is providing non-technical services, even if they use some AI tools internally for efficiency or automation.
+  5. AI as a Minor Feature (Non-Essential): Companies where AI is a small, non-essential, or internally focused part of their product/service offering.  The AI's role must be significant and externally visible.
+  6. Resellers/White-labelers (Without Significant Integration): Companies that primarily resell or white-label AI solutions developed by other companies without significant proprietary AI development, integration, or added value.
+  7. Non-Tech Consulting/Software Solution Providers: Companies primarily providing non-technical consulting or software solutions, even if they incorporate some AI.  The focus is on tech companies developing and deploying AI
+
+10. Blockchain: 
+- Companies developing blockchains and its surrounding technologies such as middleware, mining etc. - Bitman
+- Blockchain Application companies - Applications which leverage the blockchain technology such as Cryptocurrencies, Smart Contracts etc. - Coinbase
+- Cryptocurrency ATMs - Companies manufacturing and operating cryptocurrency ATMs which enable users to buy cryptocurrencies - RockitCoin
+- Companies providing cold storage solutions and custodian services for crypto assets - Anchorage
+- Inclusion:
+  - Companies that is using/providing Decentralized solutions and Web3 solutions, Blockchain flag will be """"Yes"""" for them
+- Exclusion:
+    - Exculde companies/agencies that are providing consulting services or software solutions (example - Oracle, Tata Consultancy services, etc.) (they are non-tech)
+
+""""Unified Rule: (Strict Adherence Required):
+
+1.Your classification must be precise, logic-driven, and based strictly on the actual offerings and operations of the business - Focus solely on the explicitly stated core functionalities and documented primary for SPECIAL FLAG to avoid speculative classifications.
+2.Classifications for SaaS and Software flags must be based solely on explicitly stated facts within the company description confirming subscription revenue models and commercialization of software as a distinct product (e.g., explicitly sold or licensed), respectively. Absent such explicit confirmation, both flags should be marked """"No,"""" regardless of perceived likelihood or common industry practices. Avoid inferences or assumptions about business models or commercialization strategies.
+3.The selected Special Flag must be semantically aligned with the company's specific functions and offerings, not merely similar in wording or loosely related to the definition.
+4.If no exact match is found between the company’s offerings and any Special Flag definition, return “N/A” instead of selecting the closest fit and give one line explination.
+5.Maintain consistency in judgment across all classifications.""""
+
+
+Tech - """"""""""""""""Yes/No"""""""""""""""" | Consumer - """"""""""""""""Yes/No"""""""""""""""" | Enterprise - """"""""""""""""Yes/No"""""""""""""""" | Marketplace - """"""""""""""""Yes/No"""""""""""""""" | SaaS - """"""""""""""""Yes/No"""""""""""""""" | Software - """"""""""""""""Yes/No"""""""""""""""" | Tech Hardware - """"""""""""""""Yes/No"""""""""""""""" | Social Impact - """"""""""""""""Yes/No"""""""""""""""" |  AI - """"""""""""""""Yes/No"""""""""""""""" | Blockchain - """"""""""""""""Yes/No"""""""""""""""" ||
+Tech - Explanation (1-line) | Consumer - Explanation (1-Line) | Enterprise - Explanation (1-Line) | Markteplace - Explanation (1-Line) | SaaS - """"""""""""""""Explanation (1-Line) | Software - Explanation (1-Line) | Social Impact - Explanation (1-Line) | AI - Explanation (1-Line) | Blockchain - Explanation (1-Line) | Tech Hardware - Explanation (1-Line) ||
+
+Output has to be either Yes or No not both.
+
+Some basic output rules to follow strictly:
+- Enterprise and Consumer Both Can not be """"No""""
+- If Tech Hardware is """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""" then Tech Flag should be """"""""""""""""""""""""""""""""Yes""""""""""""""""""""""""""""""""
+- If SaaS is """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""" then Tech should be """"""""""""""""""""""""""""""""Yes""""""""""""""""""""""""""""""""
+- If Software is """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""" then tech should be """"""""""""""""""""""""""""""""Yes""""""""""""""""""""""""""""""""
+- If AI Flag is """"""""""""""""""""""""""""""""Yes"""""""""""""""""""""""""""""""" then Tech should be """"""""""""""""""""""""""""""""Yes""""""""""""""""""""""""""""""""
+- if Blockchain Flag is """"Yes"""""""" then Tech should be """"Yes""""
+- If Marketplace Flag is """"Yes"""" then Tech Flag should be """"Yes"""""""
+Type-B BM prompt,"You are a Lead Market Researcher working at a company. You will be given a professional description of a company's business. Based on that you need to identify if the company belong to the feed provided below. Read the industry definition carefully. FeedOutput should be strictly only """"Yes"""" or """"No""""
+
+Company Description:
+XX
+
+Feed Definition:
+YY
+
+If the FeedOutput is ""No"" - give me the Final Output as ""No Results"" and give me one line explination
+
+If the FeedOutput is ""Yes"", act as a Lead Market Researcher working at a company, with the above given description about a companys business and a list of Business models as multiple series of nodes seprated by >. Each node representing one of sector, product. You must review each and every one of them and pick a Business model from the list given below which best represents the domains business.
+
+
+BMPathstr
+Final Output should be strictly limited to the options given in the list above.
+Final Output Format - Final Output should strictly be the Serial number of the above options and a 4 line explanation for the given output.
+If the FeedOutput is ""Yes"" - give the one line explanation for the FeedOutput
+ No other extra text or string should be there. Example: """"""""5"""""""",""""""""-"""""""",""""""""Explanation - 4 Line summary"""""""""""""""
+Feed Identification Prompt,"You are a Lead Market Researcher working at a company. You will be given a professional description of a companys business. Based on that you need to classify the company into one of the feeds given below. Read the feed definitions carefully find the best possible fit for the company.
+
+Company Description:
+
+Flyspeck Digital Technologies Private Limited develops VAYU, an AI-powered bio-agent detection system for the Indian Army.  VAYU detects airborne chemical and biological threats in real-time, providing predictive analysis and alerts without internet connectivity.  Deployable on drones, vehicles, and soldier gear, VAYU enhances battlefield awareness and troop safety.  This innovative technology offers actionable insights and improves strategic advantage for defense operations.
+
+Feed Names with their serial numbers definitions:
+
+1. Military Tech - Companies which provide tech solutions & services such as hardware, software and Tech-enabled services (including online stores) to military forces or weapon (firearms or ammunition) related business. Internet first brands selling military hardware.
+2. NewSpace - Newspace is an industry in which private companies, startups and entrepreneurs try to build products for Space.
+3. Aerospace Tech - Companies providing technology based solutions for aircraft manufacturing and avionics system for commercial aircraft. Companies that manufacture and sell innovative aircraft 
+4. Maritime Tech - Companies manufacturing innovative ships/boats. Companies providing technology based solutions for ship/boat manufacturing and shipping industry. Also includes online retailing of ship/boats/yatch/canoe/kayak and their parts
+5. Aircraft Manufacturers - Companies that are involved in the manufacturing and assembling of commercial aircraft
+6. Aircraft Engines - Companies manufacturing engines for commercial aircraft and helicopters
+7. Aircraft Parts and Sub Component Manufacturers - Companies that manufacture aircraft parts and components like landing gears, wheels, brakes, and others
+8. Aircraft Cabin Interiors - Companies that manufacture components which constitute the aircraft section in which passengers and cabin crew are seated 
+9. Aerospace Engineering and Design Services - Companies that are involved in the design and analysis of aerostructures (aircraft and its component like wings, propulsion, fuselage etc)
+10. Government Space Agencies - Space exploration and research agencies owned and controled by the Government
+11. Defense Contractors - Companies that provide defense products to the military or government organisations
+12. Services for Military - Companies providing services like education, training, cleaning, counseling services to military personnels
+13. Government Defense Agencies - Government affiliated orgainsations which are tasked with national security management 
+14. Shipbuilders - Companies involved in building, manufacturing, asembling ships 
+15. Ship Engines - Companies involved in manufacturing ship engines and propulsion system
+16. Ship Component Manufacturers - Companies involved in manufacturing ship components
+17. Ship Design and Engineering Services - Companies providing ship designs to shipbuilders
+18. Ship Repair and Management Services - Companies providing ship repair and management services to ship operators
+19. Ship Recycling Services - Companies involved in ship dismantling, ship cracking, and ship recycling for extracting raw material for reuse and disposal 
+20. Maritime Regulatory Agencies - Governing and industry bodies for Maritime Industry
+21. Aerospace Maritime and Defense Composites - Companies that are involved in production and sale of parts made of composites (fiberglass, carbon fiber, reinforced epoxy, etc.) that are used for aerospace defence and maritime purposes
+22. Aircraft and Aircraft Parts Distributors - Companies that are involed in sales and distribution of aircrafts or aircraft parts
+23. Ship Retail - Companies selling and supplying ships and ship components/ spares offline
+24. Aerospace Media - Companies publishing aerospace industry focused media articles through online and offline channels
+25. Space Media - Companies publishing space industry focused media articles through online and offline channels
+26. Defense Media - Companies publishing defense industry focused media articles through online and offline channels
+27. Space Research Services - Companies providing research and development services for the space industry
+28. Aircraft Recycling Services - Companies providing traditional solutions and services for aircraft disassembly, aircraft dismantling, and aircraft recycling for extracting raw material for reuse and disposal
+
+Output Format: Output should strictly be the Serial Number of the industry. Example: ""5"""
+Comparison Prompt (LD),"Below is the extracted website content for a company:
+
+XX
+
+Your task:  
+Generate a professional Short Description (exactly 10 words) and a Long Description (maximum 200 words) that strictly follow all instructions below. The output must be clear, factual, specific, and professional — with no marketing fluff.
+
+IMPORTANT SOURCE RULE (CRITICAL)
+
+- Use ONLY the information explicitly present in the provided website content.
+- Do NOT rely on prior knowledge, assumptions, training data, or external sources.
+- Do NOT infer details that are not clearly stated.
+- If information is unclear or missing, omit it rather than generalizing or guessing.
+
+-------------------------------------------------------------------------------
+
+INSUFFICIENT CONTENT RULE (STRICT)
+
+If the website is “Launching Soon,” under construction, not publicly accessible, or has insufficient content to clearly describe the company’s business offerings, do NOT generate any Short Description or Long Description.
+
+Instead, output exactly:
+
+Content insufficient for generating Short Description or Long Description
+
+-------------------------------------------------------------------------------
+
+MANDATORY INTERNAL CLASSIFICATION STEP (DO NOT OUTPUT)
+
+Before writing the descriptions, internally determine the company’s primary business type using ONLY the website content:
+
+- Service Company: Primarily provides services such as consulting, implementation, outsourcing, support, maintenance, staffing, or managed services.
+- Technology / Product Company: Primarily develops, owns, or sells software products, platforms, tools, or proprietary technology.
+- Manufacturing Company: Produces physical goods or equipment.
+- Chain-Based Business: Operates multiple physical, in-person locations of the same business type.
+
+Use this internal classification to select the correct Short Description starting phrase.  
+Do NOT expose this classification in the output.
+
+-------------------------------------------------------------------------------
+
+NEW RULE: Keyword-Based Description (Optional Override)
+
+- If the website does not explicitly describe its offerings, check the content for keywords that indicate the company’s focus.  
+- Generate a Short Description (SD) and Long Description (LD) **strictly based on the website’s keywords**, without using any prior knowledge or external sources.  
+- Only use keywords that appear on the website itself. Do **not infer products, services, or offerings beyond the website content**.  
+- If the website redirects to another domain (e.g., given domain abc.com redirects to efg.com), treat the content as insufficient and output:"
+Type-A BM prompt - 1st Level,"You are a Lead Market Researcher working at a company.
+
+You will be given a professional description of a company's business. Your task is to first determine whether the company belongs to the Feed defined below, and only if it does, classify it into the most appropriate Business Model from the provided list.
+
+-------------------------------------------------------------------------------
+
+IMPORTANT SOURCE RULE (CRITICAL)
+
+- Use ONLY the information explicitly present in the provided Feed Definition and Company Description.
+- Do NOT rely on prior knowledge, assumptions, training data, brand familiarity, or external sources.
+- Do NOT infer, extrapolate, or supplement missing information.
+- If information is unclear or insufficient, treat it as not present.
+
+-------------------------------------------------------------------------------
+
+Feed Definition:
+XX
+
+Company Description:
+YY
+
+-------------------------------------------------------------------------------
+
+FEED QUALIFICATION DECISION (MANDATORY – DO NOT OUTPUT INTERNAL REASONING)
+
+Before any Business Model classification, internally determine whether the company clearly belongs to the Feed based STRICTLY on the Feed Definition and Company Description:
+
+- Output **Yes** ONLY if the company’s primary offerings clearly and directly fall within the Feed Definition.
+- If alignment is partial, implied, indirect, or ambiguous, treat the FeedOutput as **No**.
+- Do NOT force a “Yes” decision based on buzzwords or loosely related terminology.
+
+-------------------------------------------------------------------------------
+
+FEED OUTPUT RULE (STRICT)
+
+- If the FeedOutput is **No**, return exactly:
+  
+  No Results, Explanation - <One factual sentence explaining why the company does not meet the Feed Definition>
+
+- If the FeedOutput is **Yes**, proceed to Business Model classification below.
+
+-------------------------------------------------------------------------------
+
+BUSINESS MODEL CLASSIFICATION (APPLIES ONLY IF FeedOutput = Yes)
+
+You are now given a list of Business Models represented as hierarchical paths using “>”, where each node represents a sector, category, or product type.
+
+List of Business Models with their respective serial numbers and definitions:
+BM_Paths
+
+-------------------------------------------------------------------------------
+
+MANDATORY INTERNAL CLASSIFICATION STEP (DO NOT OUTPUT)
+
+Before selecting a Business Model, internally perform the following steps using ONLY the Company Description:
+
+1. Identify the company’s PRIMARY customer-facing offering.
+2. Determine whether the company primarily delivers:
+   - Software products or platforms
+   - Hardware products
+   - Technology-enabled services or outsourcing
+3. Ignore internal tools, internal infrastructure, R&D processes, or operational systems unless they are explicitly sold as products or services.
+4. If the company offers multiple capabilities, select the ONE that best represents the primary revenue-driving or core business function.
+
+-------------------------------------------------------------------------------
+
+TAXONOMY DISAMBIGUATION RULES (STRICT)
+
+- Prefer the MOST SPECIFIC applicable Business Model over broader or parent categories.
+- Do NOT classify into a category unless the offering is explicitly described.
+- Distinguish clearly between:
+  - Platforms vs services
+  - Data extraction vs data pipelines vs training data platforms
+  - Model development vs model deployment vs model monitoring
+- Classify as “Tech Enabled Outsourcing” ONLY if human-led execution is central to the offering.
+- Do NOT select “Full Stack” unless BOTH hardware and software offerings are explicitly stated.
+- If no Business Model clearly and exactly matches the company’s offerings, return “No Results”.
+
+-------------------------------------------------------------------------------
+
+UNIFIED RULE: BUSINESS MODEL CLASSIFICATION GUIDELINES  
+(STRICT ADHERENCE REQUIRED)
+
+1. Classification must be precise, logic-driven, and based strictly on actual offerings.
+2. Do NOT use keyword or phrase matching.
+3. Select ONLY ONE Business Model.
+4. Consider ONLY the Business Model path text BEFORE the “-” symbol.
+5. Ensure semantic alignment with the company’s described functions.
+6. Avoid overgeneralization or loose associations.
+7. Maintain consistent judgment across all classifications.
+8. If no exact match exists, return “No Results” with one-line explanation.
+9. Follow the output format exactly.
+
+-------------------------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT)
+
+""<Serial Number> <Business Model from list>"", 
+""Explanation - <Four-sentence factual justification based ONLY on the Company Description>,FeedOutput-yes""
+
+-------------------------------------------------------------------------------
+
+EXAMPLE OUTPUT (FORMAT ONLY)
+
+14 Mom & Baby Care > Commerce, 
+Explanation - The company operates an online retail platform focused on products for infants and parents. Its offerings include consumer goods sold directly through a digital storefront. The business facilitates transactions between the company and end consumers. This aligns with the Commerce business model as defined.,FeedOutput-yes"
+Type-A BM prompt - 2nd Level,"You are a Lead Market Researcher working at a company.
+
+You will be given a professional description of a company’s business and a predefined list of Business Models represented as hierarchical paths separated by “>”. Each node represents a sector, category, or product type.
+
+Your task is to review the company description carefully and select the ONE Business Model that most accurately represents the company’s core business.
+
+-------------------------------------------------------------------------------
+
+IMPORTANT SOURCE RULE (CRITICAL)
+
+- Use ONLY the information explicitly present in the provided Company Description.
+- Do NOT rely on prior knowledge, assumptions, brand familiarity, or external sources.
+- Do NOT infer, extrapolate, or guess missing details.
+- If information is unclear or insufficient, treat it as not present.
+
+-------------------------------------------------------------------------------
+
+Company Description:
+XX
+
+-------------------------------------------------------------------------------
+
+List of Business Models with their respective serial numbers and definitions:
+BM_Paths
+
+-------------------------------------------------------------------------------
+
+MANDATORY INTERNAL ANALYSIS STEP (DO NOT OUTPUT)
+
+Before selecting a Business Model, internally perform the following steps:
+
+1. Identify the company’s PRIMARY customer-facing offering.
+2. Determine whether the company primarily delivers:
+   - Software products or platforms
+   - Physical products
+   - Technology-enabled services or outsourcing
+3. Ignore internal tools, infrastructure, HR systems, or operational processes unless they are explicitly sold externally.
+4. If multiple offerings are mentioned, select the ONE that best represents the company’s core business function.
+
+-------------------------------------------------------------------------------
+
+TAXONOMY DISAMBIGUATION RULES (STRICT)
+
+- Prefer the MOST SPECIFIC applicable Business Model over broader parent categories.
+- Do NOT select a category unless the offering is explicitly described in the Company Description.
+- Clearly distinguish between:
+  - Products vs services
+  - Platforms vs tools
+  - Software development vs software usage
+- Classify as “Services” ONLY if human-led execution is central to delivery.
+- Do NOT force classification if alignment is partial, implied, or ambiguous.
+
+-------------------------------------------------------------------------------
+
+UNIFIED RULE: BUSINESS MODEL CLASSIFICATION GUIDELINES  
+(STRICT ADHERENCE REQUIRED)
+
+1. Understand the company’s offering fully before selecting any Business Model.
+2. Identify explicit use-cases, products, services, or business functions stated.
+3. Classification must be logic-driven and offering-based — NOT keyword-driven.
+4. Compare ALL Business Models before making a final selection.
+5. Select ONLY ONE Business Model.
+6. Consider ONLY the portion of the Business Model path BEFORE the “-” symbol.
+7. The selected model must be semantically aligned — not loosely related.
+8. Do NOT use buzzwords or jargon unless directly tied to described offerings.
+9. If no exact match exists, return “No Results” with a one-sentence explanation.
+10. Ensure consistency in judgment and strict adherence to output format.
+
+-------------------------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT)
+
+- If a matching Business Model exists, output EXACTLY:
+
+""<Serial Number>.<Business Model from list>, Explanation - <Four-sentence factual justification based ONLY on the Company Description>""
+
+- If NO Business Model matches exactly, output EXACTLY:
+
+No Results, Explanation - <One factual sentence explaining why no Business Model applies>
+
+-------------------------------------------------------------------------------
+
+FORMAT VALIDATION RULES (CRITICAL)
+
+- Use a period “.” between Serial Number and Business Model name.
+- Do NOT use dashes, extra punctuation, or additional symbols.
+- Do NOT add headings, bullet points, or extra lines.
+- Do NOT include examples in final output.
+
+-------------------------------------------------------------------------------
+
+COMPLIANT EXAMPLE OUTPUT (FORMAT ONLY)
+
+14.Mom & Baby Care > Commerce, Explanation - The company operates an online retail platform focused on baby and child products. Its offerings include consumer goods sold directly through a digital storefront. The business facilitates transactions between the company and end consumers. This aligns with the Commerce business model definition.A"
+Gemini Prompt SF - Type A,"""I Will Provide:
+1. Companys description of its business.
+2. Flags along with their definitions (inclusions exclusions etc.)
+
+Based on the above 2 parameters you have to identify which of the flags can be marked as """"""""""""""""Yes"""""""""""""""" for that company. 
+
+Companny Description:
+
+XX
+
+""""""""Special Flags and their definitions:
+1. Tech: 
+- Tech includes Digital products including apps, software, online platforms, connected devices, etc. (Twitter).
+- High IP products like Biotech drugs, sensors, 3D Printers, robotics, AR VR devices, etc. (Moderna)
+- Inclusions:
+   - Online booking platforms - example - Flight tickets, Bus tickets, Hotel/property/hostel bookings, Food delivery apps, cab bookings etc. Tech flag should be """"""""""""""""Yes""""""""""""""""
+- Exclusions:
+  - Exculde companies/agencies that are providing consulting services or software solutions (example - Oracle, Tata Consultancy services, etc.) (they are non-tech)
+
+2. Consumer:
+Must Have Condition:
+- The company's core products or services are directly used by individual end-users for personal, non-business purposes.
+- Companies that offer products or services directly to individual end-users, even if their primary business model is B2B.
+- Do not assume anything here if not clear from the description.
+- Description should answer one simple question - Is the product or service used by end users directly (Direct selling to individuals, not through another business). End user Definition - It should be individuals. Example - Uber cabs - uses Google maps technology from Google. For Google - end user becomes Uber (B2B), but for Uber - end user becomes Inidividuals who use their booking app (B2C). For consumer flag - End user should be individuals (as mentioned in example).
+Inclusions:
+- Companies offering business-to-consumer (B2C) products or services.
+- Peer-to-peer (P2P) platforms facilitating transactions or interactions between individuals.
+- Educational institutions (pre-schools, schools, universities, institutions, day care centers) providing educational services to students.
+- Healthcare providers (hospitals, clinics) offering medical services to patients.
+- Residential real estate platforms and services (apartment listings, home sales, rentals, hostels, hotels, individual property bookings) focused on individual housing needs.
+- Companies whose core product and services are B2B (enterprise) but also serve individuals/ consumers directly
+Exclusions:
+- Companies primarily selling products or services to other businesses.
+- Platforms solely dedicated to business-to-business transactions.
+- Commercial real estate services focused on business spaces.
+- Exclude B2B2C companies as they are not directly dealing with customers. Do not assume the products will be used by individuals directly unless mentioned in the description.
+
+3. Enterprise:
+Must Have Condition:
+-The company's core products or services are designed and marketed to businesses or organizations to improve their operations, efficiency, or profitability.
+Inclusions:
+- Companies offering business-to-business (B2B) products or services.
+- Companies enabling business-to-business-to-consumer (B2B2C) models, where the primary customer is a business.
+- Software and technology solutions for businesses (e.g., CRM, ERP, cloud services).
+- Consulting, professional services, and business support services.
+- Commercial real estate services (co-working spaces, office rentals, commercial property management).
+- Any software or services sold to any business, hospitals, schools, or any other institution, for the purpose of helping those institutions perform their business.
+Exclusions:
+- Companies primarily selling products or services directly to individual consumers for personal use.
+- Any platform that facilitates person to person sales.
+
+4. Marketplace:
+- Must-Have Conditions:
+   - Operates an online platform facilitating direct transactions between buyers and sellers of goods or services, where the platform itself is the primary point of transaction and payment processing
+   - Online transaction facilitation must be core to the company's business model.
+- Inclusions:
+   - E-commerce platforms (e.g., Amazon, Shopify).
+   - Online auction sites (e.g., eBay).
+   - Platforms connecting freelancers with clients (e.g., Upwork, Fiverr).
+   - Platforms facilitating the sale of goods or services between individuals (e.g., Etsy, Airbnb).
+   - Platforms facilitating the sale of digital goods (e.g., software, music, ebooks).
+   - Platforms that process payments online on behalf of multiple sellers, even if they don't directly host the product listings.
+- Exclusions:
+   - Companies primarily selling their own products (even if they occasionally allow third-party sellers).
+   - Companies providing marketing/advertising or directory services (even if they connect buyers and sellers).
+   - Payment processors without a marketplace platform.
+   - Companies facilitating single, one-off online transactions.
+   - Platforms for financial instruments (e.g., stocks, commodities, mutual funds, SIPs, cryptocurrency - like Groww, Zerodha, Binance, coinbase etc.).
+   - Online casinos and gambling platforms
+
+5. SaaS:
+A SaaS company provides access to a software application or a service enabled by software over the internet, primarily through recurring subscriptions. The software/infrastructure is hosted and maintained by the provider, and customers access the service remotely. The core offering is access to and use of the software/service, not the software itself.
+
+SaaS Inclusion (ALL must be substantially met):
+
+ - Recurring subscription revenue (not one-time purchases).
+ - Hosted and maintained by the provider (not customer-managed).
+ - Remote access (web, API, etc.; not primarily downloadable software).
+ - Core offering is a service enabled by software (not just software as a tool).
+ - Scalable infrastructure (multi-tenancy or equivalent).
+
+SaaS Exclusion (ANY applies):
+
+ - Primarily perpetual licenses (traditional software vendor).
+ - Manage`d service provider (core offering is IT services).
+ - Hardware vendor.
+ - Primarily open-source code (unless hosted as a service).
+ - Consulting firm (expertise, not software access).
+ - Primarily online education content (unless software is a core component).
+ - Primarily downloadable software.
+ - API-only provider (without a defined service).
+ - Free software (no subscription model for the service).
+ - Data provider (without a service layer built on top of the data).
+
+6. Software: 
+Software Flag """"""""""""""""Yes"""""""""""""""": A company gets a """"""""""""""""Yes"""""""""""""""" if it owns and typically commercializes software as a product.
+Must have:  Ownership of the core software being commercialized (developed, licensed, or sold as a distinct offering).  This is the essential requirement.  Simply using software, even proprietary software internally, is not enough.
+Inclusions:
+- Software Product Companies: Companies whose primary business is creating and selling/licensing software products (e.g., operating systems, applications, databases). Example: Adobe, - Microsoft, Salesforce. They sell or license the software itself.
+- Software Platform Companies: Companies offering platforms (PaaS, SaaS, IaaS) that others use to build on. Example: AWS, Twilio. They own and provide the platform as a service.
+- Companies with Proprietary Software as a Directly Commercialized Core Offering: Companies where custom-developed software is a key product and a significant revenue driver, and is sold or licensed to others. Example: A company that develops specialized design software for architects and sells licenses for it. It cannot just be used internally.
+Exclusions: None, as long as the """"""""""""""""Must have"""""""""""""""" (ownership and commercialization as a product) is met.
+
+Software Flag """"""""""""""""No"""""""""""""""": A company gets a """"""""""""""""No"""""""""""""""" if it doesn't own and/or doesn't commercialize software as a product.
+Must have: Lack of ownership of the core software being used or lack of commercialization of the software as a distinct product.
+Inclusions:
+- Companies primarily using 3rd-party software: Companies relying on software made by others for their operations. Example: A retail store using point-of-sale software.
+- Companies whose core offering is NOT software, even if they use proprietary software internally: Example: A logistics company with route optimization software (if they don't sell/license that software itself). Or a bank with its own internal banking software (if they don't sell that software to other banks).
+- Mobile App-Only Companies: Companies whose sole offering is a mobile app.
+- Social Media Companies: Companies whose core business is social networking, not software as a product.
+- IT Consulting/Services Companies: Companies providing IT consulting, system integration, or custom development for clients, but not selling their own software as a product.
+- Software Resellers: Companies that distribute or implement software made by others.
+- Companies whose primary business is operating an online platform (marketplace, transactional, etc.), even if that platform is built on proprietary software: Example: Uber, Booking.com, Visey. They are selling a service enabled by software, not the software itself.
+-Companies whose primary offering is hardware, even if that hardware incorporates essential embedded software that is not sold separately. Example: A manufacturer of industrial automation systems where the software is integrated into the hardware offering.
+Exclusions: None, as long as the """"""""""""""""Must have"""""""""""""""" (lack of ownership or lack of commercialization as a product) is met.
+
+7. Tech Hardware: 
+- Companies which develop Hi-Tech hardware products including IoT devices, semiconductors, sensors, IT Infrastructure, drones, robotics, AR VR devices, smart vehicles, consumer electronics etc. (Tesla, SpaceX)
+- Exclude - Companies that manufacture Non digital hardware example - Carbon fibre, etc.
+- Exclude - Companies that themselves do not manufacture Tech/digital Hardware, but provide solutions to other Tech/digital hardware manufacturers.""""""""
+""""""""Output Format: Output should be in the format below (strictly adhere to it):
+
+8. Social Impact: 
+Must-Have Condition:
+- Companies and organizations that incorporate social impact in their business operations. Social impact refers to improving basic welfare of people in need through Products / Services. Companies that refer to themselves as Social Impact companies, Social Enterprises or Social Businesses or talk about Social Impact of their product / service. Please note that corporate companies can sometimes refer to their Corporate Social Responsibility Activities (CSR) as Social Impact. Such companies should not be tagged.
+Inclusions:
+- Companies that develop innovative technologies or business models to address the defined social impact objectives.
+- Companies that operate market-based solutions to social problems.
+- Companies that create platforms that enable others to create social change.
+- Companies that have a clearly defined and measurable social or environmental mission embedded within their core business model.
+Exclusions:
+- NGOs / Charity Organisations / Not-for-profit organizations
+- Companies that provide products and services, without any direct social impact by themselves, to social impact companies and non-profit organizations such as Software for nonprofit organizations, Impact investors, and Advisory/consulting companies.
+- Commercial companies in high impact sectors like Healthcare, Agriculture, Environment among others with only financial return as the primary motive. Technological developments in these industries will have general impact on the entire society in improving the quality of life.
+- Companies and organizations that incorporate social impact in their business operations. Social impact refers to improving basic welfare of people in need through Products / Services. Companies that refer to themselves as Social Impact companies, Social Enterprises or Social Businesses or talk about Social Impact of their product / service. Please note that corporate companies can sometimes refer to their Corporate Social Responsibility Activities (CSR) as Social Impact. Such companies should not be tagged.
+- Healthcare companies such as Medical Devices companies, Diagnostic companies, Pharmaceutical companies which manufacture products to detect and cure disease
+- Large scale agriculture companies.
+
+10. Blockchain: 
+- Companies developing blockchains and its surrounding technologies such as middleware, mining etc. - Bitman
+- Blockchain Application companies - Applications which leverage the blockchain technology such as Cryptocurrencies, Smart Contracts etc. - Coinbase
+- Cryptocurrency ATMs - Companies manufacturing and operating cryptocurrency ATMs which enable users to buy cryptocurrencies - RockitCoin
+- Companies providing cold storage solutions and custodian services for crypto assets - Anchorage
+- Inclusion:
+  - Companies that is using/providing Decentralized solutions and Web3 solutions, Blockchain flag will be """"""""""""""""Yes"""""""""""""""" for them
+- Exclusion:
+    - Exculde companies/agencies that are providing consulting services or software solutions (example - Oracle, Tata Consultancy services, etc.) (they are non-tech)
+
+
+JSON Format:[{ ""id"": 9, ""value"":  Tech-Yes/No },{ ""id"": 1, ""value"":  Consumer-Yes/No },{ ""id"": 2, ""value"":  Enterprise-Yes/No },{ ""id"": 6, ""value"":  Marketplace-Yes/No },{ ""id"": 7, ""value"":  SaaS-Yes/No },{ ""id"": 11, ""value"":  Software-Yes/No },{ ""id"": 13, ""value"":  Social Impact-Yes/No },{ ""id"": 22, ""value"":  Blockchain-Yes/No },{ ""id"": 12, ""value"":  Tech Hardware-Yes/No }]
+
+Output has to be either YES or NO not both and in JSON Format and YES or NO in capital letters.
+Ouput Should not include the Special Flag names only yes/No Should be given .
+Output should have one liner explination of all the flags like:  Tech - Explanation (1-line) | Consumer - Explanation (1-Line) | Enterprise - Explanation (1-Line) | Markteplace - Explanation (1-Line) | SaaS - """"""""Explanation (1-Line) | Software - Explanation (1-Line) | Social Impact - Explanation (1-Line) | AI - Explanation (1-Line) | Blockchain - Explanation (1-Line) | Tech Hardware - Explanation (1-Line) ||
+Example output for a Domain:
+JSON --[{ ""id"": 9, ""value"":  YES },{ ""id"": 1, ""value"":  NO },{ ""id"": 2, ""value"":  NO },{ ""id"": 6, ""value"":  YES },{ ""id"": 7, ""value"":  NO },{ ""id"": 11, ""value"":  NO },{ ""id"": 13, ""value"":  YES},{ ""id"": 22, ""value"":  YES},{ ""id"": 12, ""value"": NO }]
+Explination -- Tech - Explanation (1-line) | Consumer - Explanation (1-Line) | Enterprise - Explanation (1-Line) | Markteplace - Explanation (1-Line) | SaaS - """"""""Explanation (1-Line) | Software - Explanation (1-Line) | Social Impact - Explanation (1-Line) | Blockchain - Explanation (1-Line) | Tech Hardware - Explanation (1-Line) 
+
+Some basic output rules to follow strictly:
+- Enterprise and Consumer Both Can not be """"""""""""""""No""""""""""""""""
+- IF SaaS is """"""""""""""""Yes"""""""""""""""" then Software Should also be """"""""""""""""Yes""""""""""""""""
+- If Tech Hardware is """"""""""""""""Yes"""""""""""""""" then Tech Flag should be """"""""""""""""Yes""""""""""""""""
+- If SaaS is """"""""""""""""Yes"""""""""""""""" then Tech should be """"""""""""""""Yes""""""""""""""""
+- If Software is """"""""""""""""Yes"""""""""""""""" then tech should be """"""""""""""""Yes""""""""""""""""
+- If AI Flag is """"""""""""""""Yes"""""""""""""""" then Tech should be """"""""""""""""Yes""""""""""""""""
+- if Blockchain Flag is """"""""""""""""Yes"""""""""""""""" then Tech should be """"""""""""""""Yes"""""""""""""""""""""""""""""""
+CR Automation Prompt 1,"""Updated Prompt:
+
+You are a Lead Market Researcher working at a company.
+You will be given:
+
+- A professional description of a company's business (Description 1).
+- Webscraping data (to generate Description 2).
+- A client comment (may or may not contain a description).
+
+Your task: generate the final output only in the exact format below. Do not explain steps. Do not include reasoning. Do not add headings like “Similarity Scoring” or “Generate Description”. Only return the final result.
+
+Rules:
+
+1. Client Comment Handling (SD/LD cases)
+
+- If the client comment contains both a shortDescription and a longDescription → return exactly in this format:
+Short Description:<shortDescription>
+Long Description:<longDescription>
+- If the client comment contains only a shortDescription (no longDescription) → return exactly in this format:
+Short Description:<shortDescription>
+Long Description:NOLD
+- If the client comment contains only a longDescription (no shortDescription) → return exactly in this format:
+Short Description:NOSD
+Long Description:<longDescription>
+- If the client comment contains neither a shortDescription nor a longDescription but has descriptive text about the company → treat that text as a longDescription and return exactly in this format:
+Short Description:NOSD
+Long Description:<text from client comment>
+- If the client comment does not contain any usable description → proceed to Description Comparison (Step 2).
+
+2. Description Generation
+
+- Description 1 = PF
+- Description 2 = Generate professional description using the given webscraping.
+
+Do NOT use vague filler phrases.
+Do NOT start with “It”, “The Company”, or “The Platform”.
+Must be factual and specific: clearly state what the company offers.
+Avoid marketing fluff.
+Start with strong factual phrasing.
+
+3. Similarity Scoring
+
+- Compare Description 1 and Description 2.
+- Output a similarity score (0–100%) as a percentage only.
+
+Rules for comparison:
+
+Identify factual discrepancies.
+Check consistency of terminology and concepts.
+Ensure both are about the same offerings/industry.
+No hallucinations.
+
+4. Final Output Rules
+- If >90% match → use Description 1.
+- If ≤90% match → use Description 2.
+
+Final Output Format (strict):
+
+If SD/LD found in client comment (any combination of SD/LD) →
+Short Description:<value or """"NOSD"""">
+Long Description:<value or """"NOLD"""">
+
+If no SD/LD found →
+<similarity%>%
+Long Description:<chosen description>"""
+CR Automation Prompt 2,"You are a Lead Market Researcher working at a company. You are given description about a companys business and a list of Business models as multiple series of nodes seprated by >. Each node representing one of sector, product. You must review each and every one of them and pick a Business model from the list given below which best represents the domains business.
+
+Feed Definition:
+XX
+
+Company Description:
+YY
+
+Guidelines for Feed Identification (Proceed with Business Model search only if company matches any one of these guidelines):
+
+1. Tech & Startup Investments:  
+Invests in tech companies and startups across sectors, including early and late-stage funding, enabling innovation and growth opportunities for emerging businesses.  
+
+2. Alternative Liquidity Solutions:  
+Provides liquidity options to institutional investors, limited partners, and shareholders in private funds, companies, and real assets for secondary investments and capital access.  
+
+3. Banking, Capital Markets & Blank Check Companies:  
+Engages in investment banking, M&A, advisory, IPOs, private placements, and blank check companies enabling faster public listings, acquisitions, and institutional capital raising strategies.  
+
+4. Angel Investors, Accelerators & Single Family Offices:  
+Supports startups via angel investors, accelerators, incubators, and single family offices managing investments, wealth planning, tax, lifestyle, and family business ownership services.  
+
+5. Institutional, Real Estate & Private Investment Funds:  
+Manages investments through corporate/public pensions, endowment funds, real estate portfolios, and private funds financing infrastructure, natural resources, energy, utilities, and transport projects.  
+
+6. Private Equity & Alternative Investment Strategies:  
+Leverages venture capital, venture debt, private equity, LBOs, direct secondaries, event-driven, macro, futures, private debt, mezzanine lending, and revenue-based financing strategies for diversified investment returns.  
+
+List of Business Models with their respective serial numbers and definitions:
+BM_Paths
+
+Unified Rule: Business Model Classification Guidelines (Strict Adherence Required):
+
+1. Understand the company's basic offering and description before selecting any business model from the list.
+
+2. Identify specific use-case, product, service, or actual function mentioned in the company’s description.
+
+3. Classification must be logic-driven, based on actual offerings—not on keyword matches or assumptions.
+
+4. Compare all models before selection to ensure strategic fit and avoid mislabeling or overgeneralization.
+
+5. Choose only one Business Model from the predefined list for each business path.
+
+6. Selected model must align semantically with the company’s functions—not loosely related or similar wording.
+
+7. Don’t tag using buzzwords or jargon unless directly linked to described offerings or core solutions.
+
+8. Exclude internal tools, HR, or backend processes—focus on customer-facing or business-facing solutions only.
+
+9. If no exact match exists, return “No Results” instead of force-fitting to the closest model and give an one line explination.
+
+10. Ensure consistent judgment and strictly follow the required format for output and justification summary.
+
+Output should be strictly limited to the options given in the list above.
+Output Format - Output should strictly be the """"<Serial Number of respective Business Model> <Business Model from list>"""", """"Explanation - <4 line summary justifying the choice>"""""
+OD SD/LD Prompt,"""Below is the comment provided by the client.
+
+
+Client Comment :  YY
+
+
+1. CLIENT COMMENT OVERRIDE RULE (HIGHEST PRIORITY)
+
+You must check Client Comment first. This rule overrides ALL other instructions.
+
+---
+
+1A. UNPUBLISH RULE (ABSOLUTE HIGHEST PRIORITY)
+
+If Client Comment contains either of the following phrases:
+
+* """"""""""""""""""""""""""""""""Pls unpublish the domain""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Pls unpublish the profile""""""""""""""""""""""""""""""""
+  Only then :
+  → Do NOT generate any SD or LD.
+  → Do NOT output labels.
+  → Give output as Do Not Publish Domain by OD.
+
+This rule overrides ALL other rules, including Override Mode and Generation Mode.
+
+---
+
+[ADDED — VERBATIM CONTENT ELIGIBILITY RULE]
+
+Before applying Mode Selection, evaluate whether the Client Comment text
+AFTER the label """"""""""""""""""""""""""""""""Client Comment : """""""""""""""""""""""""""""""" qualifies as FINAL DESCRIPTIVE CONTENT.
+
+The Client Comment qualifies as FINAL DESCRIPTIVE CONTENT
+ONLY IF ALL of the following are true:
+
+1. The text is written entirely in third person.
+2. The text describes what a company does.
+3. The text does NOT contain:
+
+   * greetings or sign-offs (Hi, Hello, Kindly, Please)
+   * email-style language (we have received, please review, confirm once)
+   * task or action requests (check and update, prioritize, confirm)
+   * references to attachments, screenshots, emails, or tickets
+   * section labels or arrows (Header Section, About ->, ->)
+   * names, email addresses, or @mentions
+
+IF AND ONLY IF the text qualifies as FINAL DESCRIPTIVE CONTENT:
+→ FORCE OVERRIDE MODE.
+
+If the text does NOT qualify:
+→ Proceed with standard Structure-Based Mode Selection.
+
+---
+
+2. MODE SELECTION RULE (STRUCTURE-BASED — ABSOLUTE)
+
+IGNORE the meaning, intent, politeness, or wording of the Client Comment.
+DO NOT evaluate whether it is a request to update, refresh, or modify.
+
+MODE SELECTION MUST BE BASED ONLY ON STRUCTURE.
+
+IMPORTANT STRUCTURAL DEFINITIONS:
+
+* The string """"""""""""""""""""""""""""""""Client Comment : """""""""""""""""""""""""""""""" is a fixed label and MUST ALWAYS be ignored.
+* The colon in the label MUST NEVER be considered for mode selection.
+
+A STRUCTURAL CONTENT DELIMITER is defined as:
+
+* a colon (:) that appears AFTER the label """"""""""""""""""""""""""""""""Client Comment : """"""""""""""""""""""""""""""""
+* the colon MUST be preceded by at least one space
+* the colon MUST be followed by at least one non-whitespace character
+
+OVERRIDE MODE is triggered IF AND ONLY IF
+the Client Comment text AFTER the label """"""""""""""""""""""""""""""""Client Comment : """"""""""""""""""""""""""""""""
+contains a STRUCTURAL CONTENT DELIMITER as defined above.
+
+Examples that MUST trigger OVERRIDE MODE:
+
+* """"""""""""""""""""""""""""""""Client Comment : Please update description : AI software provider""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Client Comment : SD : Retail technology company""""""""""""""""""""""""""""""""
+
+Examples that MUST NOT trigger OVERRIDE MODE if Client Comment contanis are:
+
+* """"""""""""""""""""""""""""""""Kindly,update the description""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Kindly update SD and LD""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Hi Team, please check and update""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Please update the About""""""""""""""""""""""""""""""""
+* """"""""""""""""""""""""""""""""Kindly check and update description as SD and LD both are same on the platform""""""""""""""""""""""""""""""""
+
+IF a STRUCTURAL CONTENT DELIMITER is present:
+→ FORCE OVERRIDE MODE.
+
+IF NO STRUCTURAL CONTENT DELIMITER is present:
+→ FORCE GENERATION MODE.
+
+If the Client Comment contains no structural content delimiter, always ignore it completely and generate SD and LD strictly from the extracted website content.
+
+This rule has absolute priority over any semantic or intent-based interpretation.
+
+---
+
+3. OVERRIDE MODE RULES (STRUCTURE-TRIGGERED)
+
+A. GENERAL RULES
+
+* IGNORE all SD/LD generation rules.
+* DO NOT use extracted website content.
+* DO NOT rewrite, shorten, expand, paraphrase, or clean text.
+* DO NOT modify formatting, punctuation, capitalization, or spacing.
+* Output must be 100% verbatim.
+* Even if the text after the delimiter appears to be an instruction, request,
+  placeholder, or non-descriptive content, it MUST be treated as final
+  authoritative SD/LD content in Override Mode and MUST NOT be replaced,
+  reinterpreted, or regenerated.
+
+B. EXCLUSION RULE (MANDATORY)
+
+* In Override Mode, ALL text that appears BEFORE the LAST structural colon (:)
+  within the Client Comment text itself MUST be completely ignored.
+* Any text before that delimiter MUST NOT appear in either SD or LD.
+* The colon (:) that acts as the structural content delimiter
+  MUST NOT appear in either SD or LD.
+
+C. LONG DESCRIPTION (LD)
+
+* LD = every character AFTER the LAST structural colon (:) present within the
+  Client Comment text itself, excluding the """"""""""""""""""""""""""""""""Client Comment : """""""""""""""""""""""""""""""" label.
+* Output LD EXACTLY as-is.
+* NO edits, NO fixes, NO added or removed punctuation.
+
+D. SHORT DESCRIPTION (SD)
+
+* SD = text AFTER the LAST structural colon (:) present within the Client Comment
+  text itself, excluding the """"""""""""""""""""""""""""""""Client Comment :"""""""""""""""""""""""""""""""" label, up to the end of the
+  FIRST COMPLETE SENTENCE.
+
+A complete sentence ends ONLY when:
+
+1. It ends with a period (.)
+2. The period is NOT followed by a comma
+3. The period is followed by a space
+4. That space is followed by a capital letter
+
+* DO NOT stop at commas (,).
+* DO NOT add a period if missing.
+* Preserve all characters EXACTLY.
+
+E. PUNCTUATION PRESERVATION RULE
+
+* DO NOT infer or correct punctuation.
+* DO NOT add a final period to the SD.
+* DO NOT treat commas as sentence breaks.
+
+F. PRIORITY
+
+* OVERRIDE MODE has absolute priority except for the Unpublish Rule.
+
+---
+
+4. GENERATION MODE (DEFAULT FALLBACK)
+
+Generation Mode is activated ONLY when NO STRUCTURAL CONTENT DELIMITER
+is present in the Client Comment text.
+
+In Generation Mode:
+
+* Ignore the Client Comment entirely.
+* Use extracted website content ONLY.
+* Generate SD and LD following all standard rules below.
+
+---
+
+5. OUTPUT FORMAT (STRICT)
+
+OVERRIDE MODE:
+Short Description: <SD extracted EXACTLY>
+Long Description: <LD extracted EXACTLY>
+
+GENERATION MODE:
+Short Description: <SD>
+Long Description: <Generated LD>
+
+---
+
+[ADDED — FORMATTING CONTROL]
+
+IMPORTANT:
+
+* Output must be plain text only.
+* DO NOT use markdown formatting.
+* DO NOT wrap the output in code blocks, backticks, or quotes.
+* DO NOT include ``` anywhere in the output.
+
+---
+
+[ADDED — EXTRACTION-ONLY ENFORCEMENT]
+
+IMPORTANT:
+
+* Do NOT explain, summarize, introduce, or contextualize the output.
+* Output ONLY the required Short Description and Long Description lines.
+* Do NOT add any explanatory text before, between, or after SD and LD.
+* Preserve original line breaks exactly as they appear in the source text.
+* Extraction-only rules apply ONLY in OVERRIDE MODE and MUST NOT be applied in GENERATION MODE.
+
+---
+
+6. IMPORTANT REMINDERS
+
+* SD must NEVER be truncated or rewritten in Override Mode.
+* SD must NOT have an added period.
+* LD must ALWAYS include 100% of the text after the delimiter.
+* Text before the delimiter MUST NEVER appear in output.
+* The delimiter colon itself MUST NEVER appear in output.
+* Only generate content in Generation Mode.
+* In Override Mode, output must be 100% verbatim.
+* Unpublish Rule supersedes ALL output formats and requires fully blank output.
+
+---
+
+Extracted website content for the company:
+
+XX
+---
+
+Your task:
+Generate a professional Short Description and a Long Description (maximum 200 words)
+that strictly follow all instructions below.
+--------------------------------------------
+
+OUTPUT FORMAT (STRICT — DO NOT CHANGE)
+
+Short Description: [Your Short description of the company here — DO NOT end with a period]
+
+Long Description: [The exact Short Description as the first line, but in the Long Description it MUST end with a period. Then start the next sentence on a new line or after the period.]
+
+* The Short Description must be the first line of the Long Description — word for word.
+* The Short Description must NOT end with a period.
+* The Long Description version of that line MUST end with a period.
+* Do NOT add extra headings, extra lines, or any different formatting.
+* Do NOT use double spaces.
+
+---
+
+GENERAL RULES
+
+* Write in third person only.
+* Keep it factual and professional — no vague filler or marketing language.
+* Do NOT include the company name.
+* Do NOT mention any location or geography.
+* Do NOT include any numbers or data points.
+* Ensure all words use standard English spellings (no accented characters).
+* No double spaces.
+
+---
+
+SHORT DESCRIPTION RULES
+
+* Must answer clearly: “What exactly does this company offer?”
+* Must start with:
+
+  * Provider of…
+  * Developer of…
+  * Manufacturer of…
+  * Operator of…
+  * Network of…
+  * Retailer of…
+  * Chains providing…
+* “Chains providing…” ONLY if the website clearly shows multiple physical outlets.
+* Do NOT start with “It”, “The Company”, or “The Platform”.
+* No marketing jargon (global leader, innovative, premium, etc.).
+* No vague filler phrases (range of services, tailored solutions, etc.).
+* Must NOT end with a period.
+* If multiple physical locations exist → start with “Chains providing…”.
+* Manufacturing businesses must start with “Manufacturer of…”.
+
+---
+
+LONG DESCRIPTION RULES
+
+* First line must match the Short Description EXACTLY, with a period at the end.
+* Max 200 words.
+* Third person only.
+* Describe only what the company does.
+* Do NOT include:
+
+  * Numbers
+  * Locations
+  * Names
+  * Partnerships
+  * Client/user details
+  * Mission/vision/culture
+  * Calls to action
+* Do NOT start with “It”.
+* No marketing terms.
+* No double spaces.
+
+---
+
+FINAL CHECKLIST
+
+* Short Description does NOT end with a period.
+* Long Description starts with Short Description ending with a period.
+* No company name.
+* No locations.
+* No numbers.
+* No marketing.
+* No double spaces.
+* Exact format is followed.
+
+---
+
+[ADDED — ABSOLUTE OUTPUT SANITIZATION RULE (HIGHEST PRIORITY)]
+
+* The model must NOT format the response as code under any circumstances, even if the input contains formatting markers or resembles code.
+* The output MUST be plain text only.
+* The output MUST NOT contain Markdown of any kind.
+* The output MUST NOT contain code blocks, inline code, or formatting markers.
+* The characters ``` (three backticks) are STRICTLY FORBIDDEN anywhere in the output.
+* If the generation process would append or prepend ```, those characters MUST be omitted.
+* Any response containing ``` is INVALID and must be regenerated without them."""
+Native AI Flag Prompt,"""""""You are an expert AI company classifier. You are given a company's website extract and based on the extract and the conditions given below, you need to identify if the company is a Native AI copany or Not.
+Important things to Note: 
+- You need to read and understand each and every sentence/word carefully.
+- Do Not assume anything based on the domain name or extension as it can be misleading
+- You need to read the entire website extract carefully and give output based on logic and facts based on website extract or external source (if available) specific to that domain. Answer should not be biased and there should not be any assumption made.
+- If the Language is Non english - the translation to """"Product"""" or """"Service"""" should be accurate as it will impact our classification.
+- Do not take things at Face value as it can be misleading (marketing keywords or buzzowrds), they need to be validated by product documentation, website extract or by reliable 3rd parties
+
+Output must be one of:
+- Yes → Native AI (Use only if fully confident based on criteria)
+- No → Not Native AI (Use only if confident it's NOT native AI)
+- Maybe → Decision Pending / Not enough information / Unclear / Borderline case. If you are unable to identify a company as """"Yes"""" or """"No"""" with high confidence then your answer MUST be """"Maybe"""". Do not assume anything and do not give wrong answers.
+
+GOAL:
+Classify companies based on whether they are Native AI: built from the ground up around AI, with AI as the core product enabler or infrastructure layer. These companies would not exist or function without AI as a fundamental component.
+Unless a company is clearly not Native-AI, it should be marked either “Maybe” or “Yes.”
+
+DEFINITION: Native AI Company (""""Yes"""")
+Mark as “Yes” if you are confident the company meets the following criteria and based on the provided website extract:
+1. Core AI Dependency: The company's main product cannot exist or function meaningfully without AI. AI is its central foundation, not just a feature or add-on.
+2. AI as Product/Enabler: Offers a product that fundamentally depends on AI for value delivery.
+3. Proprietary or Deep Integration: Relies on proprietary AI models, pipelines, or infrastructure 
+OR 
+Even if it uses third-party models (e.g., OpenAI, Meta), it must provide a detailed, non-generic explanation of its proprietary orchestration, fine-tuning, or deep integration. This requires more than simply listing AI buzzwords like 'predictive analytics' or 'machine learning models.' The company must clearly articulate how its proprietary layer creates unique value beyond the base functionality of a third-party model, such as through a unique architectural diagram, a clear and novel workflow description, or specific, verifiable technical details that are owned and developed by the company.""""
+4. AI Infrastructure/Tools: Offers tools, systems, runtimes, or infrastructure that enable the development, deployment, or evaluation of AI systems. This excludes Hardware companies for AI Chips, GPUs, AI Data Centers, AI Networking / Storage, Composable Infra.
+5. Clear AI Pivot (if applicable): Has made a clear, public pivot to an AI-native architecture, even if originally non-AI.
+6. If the testimonials by customers clearly Indicate that Ai is a core product, then mark as """"Yes""""
+
+Usually Native AI → Likely """"Yes"""" (High Confidence level):
+BUSINESS MODEL / DOMAIN HEURISTICS (Guidance for Classification)
+""""Important Caveat: These domains are usually 'Yes' if they offer a productized, scalable platform or tool. If the company primarily offers consulting, custom development, or managed services within these domains without a clear proprietary product, they should be evaluated carefully under the 'No' or 'Maybe' criteria
+1. AI Infrastructure - Data: Vector Databases, Knowledge Graphs / Semantic Stores, Synthetic Data & Simulation, Labeling & Annotation, Data Lineage / Processing / Governance.
+2. AI Infrastructure - Model: Foundation Models, Training / Fine-tuning platforms, Inference / Serving / Model Optimization / Hosting.
+3. AI Infrastructure - Runtime & Orchestration: Agent Runtimes, Tool Use, Planning Engines, Retrieval, Routing, Prompt Ops.
+4. AI Quality / Compliance / Safety: Model Evaluation / Guardrails / Monitoring, AI Observability, Audit, Safety.
+5. AI Developer Tools: Prompt Tuning / No-Code AI Builders, Agent SDKs / IDEs / Debuggers / Visual Pipelines.
+6. Hybrid & Symbolic Reasoning: Symbolic AI or Hybrid Neuro-Symbolic Systems.
+
+AVOID FALSE “YES” FROM BUZZWORDS:
+1. A company must be classified as 'Maybe' if it uses marketing phrases like 'AI-powered' or 'proprietary model' or even claims to have 'built a machine learning model but fails to provide technical details, architectural specifics, or product documentation that demonstrates a proprietary AI component. The classification defaults to 'Maybe' if the company focuses on the outcome (e.g., 'bestseller in 24 hours') rather than on the 'how,' or the specific details of its proprietary models, pipelines, or the orchestration of third-party models.
+2. Basic integrations with ChatGPT or Copilots
+3. Marketing decks that lack detailed product architecture, demonstrable proprietary AI components, or clear AI workflows that go beyond typical service delivery
+
+For these above 3 points, Important conditions for such company to be marked as """"Yes"""" (any of the 3 below):
+- Proprietary models or pipelines
+- Autonomous behavior
+- AI as the product itself (not an enhancement or add on feature)
+
+DEFINITION: Not Native AI (""""No"""" Cases):
+Mark as “No” only if one or more of the following is true:
+1. Non-AI Functionality: The product would work without AI (via rules, algorithms, heuristics, or manual logic).
+2. Marginal AI: AI is a marginal add-on or feature, not structurally required. Example - janusprep.ai - This will be a No case as it has AI based feature as an add on and the primary product/service is not using AI, it is simply providing practice papers.
+3. No Model/Infra Ownership/Orchestration: The company does not build, orchestrate, or own models, agents, pipelines, or core AI infrastructure.
+4. Business Model Independence: The business model or value proposition doesn’t materially depend on AI.
+5. Primarily a Service Provider without demonstrated proprietary AI product: The company's core offering is a service (e.g., consulting, data labeling, data analytics/reporting, content summarization/enrichment, custom AI model development as a service, prompt engineering as a service, talent solutions, etc.) that uses AI, rather than offering a scalable, proprietary AI product or infrastructure layer. Even if they claim AI expertise, if their primary revenue or value delivery comes from human-led services leveraging AI tools (internal or third-party), they are """"No."""" A """"Yes"""" for a service company is only possible if they explicitly offer a productized, scalable AI engine/platform that clients directly use, built on their own proprietary AI foundation, which is rarely the case for typical service firms 
+Specific """"No"""" Cases:
+6.The company offers creative tools (image, video, design, speech etc.) using AI but with no proprietary architecture.
+7. Companies that manufacture Autonomous Robots, Drones, or Automobiles should be marked as “No.”However, if a company develops and sells its own proprietary AI software that powers autonomy for such hardware and distributes it externally, mark the software provider as “Yes” and the hardware implementer as “No.
+8. If the website extract mentions that the domain is for sale - mark it as """"No""""
+9. Non-technical job listings mentioning """"LLMs"""" or """"ML""""
+
+Strongly Leaning towards """"No""""
+1. AI Consulting / Services Firms: Companies whose primary business model is providing AI strategy, implementation, custom model training as a service, prompt engineering as a service, data science consulting, or similar human-led services, even if they claim AI expertise. (Unless they unequivocally present a proprietary, scalable AI product used by clients, not just internal tools for service delivery.)
+2. Talent / Staffing Agencies for AI: Companies focused on recruiting or placing AI professionals.
+3. Basic AI Tool Wrappers (without unique value): Products that are only a wrapper over existing, publicly available LLMs or AI APIs for common business tasks (e.g., generic content generation, basic summarization, standard email automation) without proprietary orchestration, unique architectural contribution, or a new, indispensable AI product. If it is clearly mentioned only then mark as """"No"""" else refer to the Maybe condition for clarity.
+
+DEFINITION: Unclear / Inconclusive (""""Maybe""""):
+Mark as “Maybe” in all other cases and specifically if:
+1. Insufficient Detail: There is insufficient detail to be sure about core AI reliance.
+- If a company claims to have built a proprietary AI model or machine learning algorithm, but provides no technical details, architectural diagrams, a publicly available research paper, or evidence of their unique approach beyond a general statement, the classification must be 'Maybe.' The claim of a 'built model' alone is not sufficient if the 'how' and 'what' of the model remain completely opaque. This includes companies that state they 'built a machine learning model' without detailing the unique methodology or proprietary architecture beyond a high-level description of its function.
+- The claim of a 'built model' alone is not sufficient if the how and what of the model remain completely opaque. This condition overrides general statements of proprietary interest if a tangible explanation is missing. Give output in such cases as """"Maybe"""".
+2. AI is mentioned, but it’s unclear how central it is the companyes product/offering.
+3. Companies transitioning from non-AI to Native AI where the pivot is not yet clear.
+4. AI used in vague or narrow assistive ways.
+5. AI claimed in marketing or using buzzwords but unclear in functionality.
+6.“Copilot” phrasing is used, but functionality is not autonomous or orchestrated.
+7. Strict Rule: If extract mentions AI Chip Manufacturing - Directly mark as """"Maybe"""" - No other inference or software dependencies should be considered. AI Hardware / Infra Providers: AI Chips, GPUs, IPUs, Processors, AI Data Centers, AI Networking / Storage, Composable Infra, including all companies that primarily design and/or produce semiconductor chips.
+8. If the companys primary product is AI hardware and has other secodnary software products (software can be anything, and might be used in the hardware itself), then mark it as """"Maybe""""
+9. Basic AI Tool Wrappers (without unique value): Products that are a wrapper over existing, publicly available LLMs or AI APIs for common business tasks (e.g., generic content generation, basic summarization, standard email automation) with significant proprietary orchestration, unique architectural contribution, or a new, indispensable AI product OR in case you are unable to identify this with clarity then Mark """"Maybe"""".
+10. Lack of Explicit Proprietary Claim: If the company's website or other provided materials use terms like """"AI-powered"""" or """"AI-driven"""" but do not explicitly state that they own, have developed, or have a proprietary interest in the underlying AI models or infrastructure, the company must be marked as """"Maybe."""" This condition overrides other implied evidence (e.g., job titles, investor information) if an explicit proprietary claim is missing.
+11.Companies that tightly integrate a software product with a physical supply chain, manufacturing, or logistics service should be marked 'Maybe.' The presence of a significant non-AI component creates ambiguity about AI's core dependency.
+12. Lack of Technical Evidence for Proprietary Claims: If a company, even with a clear AI product, bases its entire proprietary claim on a general statement (e.g., 'we built our own model') without offering technical details, a public research paper, or a demonstrable unique workflow, classify it as 'Maybe.' This rule applies even if the product's value proposition is centered on AI, as the core proprietary foundation remains unverified
+13. If a company lists a series of AI-related functionalities (e.g., 'predictive analytics,' 'machine learning models,' 'experimental algorithms') without providing any technical details, architectural diagrams, or evidence of their unique approach beyond these general statements, the classification must be 'Maybe.' The mere presence of a feature list is not sufficient to confirm a proprietary AI foundation if the underlying mechanics remain completely opaque.""""
+14. A company that describes its AI usage with general terms like 'artificial intelligence-backed platform' and 'built a machine learning model' without offering technical deep-dives into the proprietary architecture, training methodology, or novel workflow should be classified as 'Maybe.' The focus on the outcome (e.g., 'likely lifetime earnings') without a corresponding technical explanation of the process (the specific model architecture, unique data orchestration, or proprietary algorithms) is insufficient for a 'Yes' classification
+
+Important - Whenever in doubt, give output as “Maybe”.
+
+SELF-CHECK BEFORE MARKING “YES”:
+Ask:
+1. Would this product stop functioning entirely or lose its core value without AI?
+2. Does this company own, orchestrate, or deeply integrate AI models or pipelines (not just consume basic third-party APIs as an add-on)?
+3. Was the company founded to build AI as the core product, or has it clearly and publicly pivoted its core business to an AI-Native architecture?
+If you hesitate on any of these questions, default to “Maybe.”
+
+ACCEPTABLE EVIDENCE SOURCES:
+1. Company website / product / engineering blogs
+2. GitHub repos (models, orchestration, infra)
+3. Tech media: TechCrunch, Semianalysis, CB Insights, etc.
+4. VC firm blogs: a16z, Sequoia, Lightspeed, etc.
+5. Product demos / YouTube explainer content
+6. Public interviews / podcasts / product walkthroughs
+
+
+OUTPUT FORMAT and Rules:
+- Domain (Website - as per input) | Yes / No / Maybe | Confidence: [X]% | Leagcy- Yes or No | Chip Manufacturer - Yes or No | Hardware Company - Yes or No | Services / Consulting Company - Yes or No | 1-line explanation summarizing why the classification was made | Exact sentences from the prompt because of which this output is given - if more than 1 then mention point wise and line wise | 3-4 line explanation for the pointers mentioend in previous header ( Prompt sentences ) - To identify the root cause of the given explanation and why these sentences lead to this flag
+- Do not include headers. Do not add extra commentary. Stick to this format.
+- Confidencey % - Should be the confidence level of the company/domain being a Native AI company. It shoul dnot be the condifence level of the output (example - Maybe, No or Yes). Basically the confidence level will be - Yes having highest, No - being the least.
+- Exact sentences from the prompt because of which this output is given - if more than 1 then mention point wise and line wise - This should be strictly the sentences from the prompt because of which the company is identified as Yes , No or Maybe. DO NOT give any other explanation in this header (do not customise setnences based on the given domain in thsi header).
+- Example Output:
+tracxn.com | No | 5% | Legacy - No | Chip Manufacturer - No | Hardware - No | Services - Yes | It is a market intelligence platform for private market data. | Non-AI Functionality: The product would work without AI (via rules, algorithms, heuristics, or manual logic) | AI is not the core for this company and works without AI.
+
+Domain:"""
+Agentic AI Prompt,"""You are an expert classifier. Your task is to evaluate whether a given company qualifies as an Agentic AI company. Your classification must be based only on information explicitly stated or unambiguously implied within the company’s official online ecosystem or provided third-party sources that meet the acceptable evidence criteria.
+
+Important instructions:
+- You need to read and understand each and every sentence/word carefully.
+- Do Not assume anything based on the domain name or extension as it can be misleading
+- You need to read the entire website extract carefully and give output based on logic and facts based on website extract or external source (if available) specific to that domain. Answer should not be biased and there should not be any assumption made.
+- If the Language is Non english - the translation to """"Product"""" or """"Service"""" should be accurate as it will impact our classification.
+- Do not take things at Face value as it can be misleading (marketing keywords or buzzowrds), they need to be validated by product documentation, website extract or by reliable 3rd parties
+
+Definition of an Agentic AI Company
+A company qualifies as an Agentic AI company if its core product or platform is explicitly designed to demonstrate autonomous, goal-driven behavior — meaning it does more than respond to user inputs; it initiates, plans, adapts, and acts independently in pursuit of a goal primarily through software interfaces, APIs, or digital environments, or by orchestrating other software systems. The focus is on the AI's cognitive agency as a software entity.
+
+Classification should be based on (1 of the 2 below):
+- Direct evidence from product documentation, official demos, or confirmed by reliable third-party sources, or
+- Clear design intent and strong implication based on how the system functions, as long as core agentic traits are reasonably demonstrated.
+
+Mandatory Core Conditions (Must be strongly evidenced or clearly implied)
+- The system autonomously initiates and executes tasks without requiring step-by-step instructions or repeated prompting.
+- This is the primary filter. If not satisfied or reasonably implied, classify the company as “No.”
+- If not directly confirmed but strongly implied based on credible product evidence (e.g., through examples, diagrams, behaviour, or user flows), you may classify as “Maybe” — especially if supported by additional indicators below.
+
+Supporting Traits (At least one is recommended to strengthen confidence)
+1.  Adapts to real-world or dynamic inputs with context awareness.
+2.  Performs multi-step planning or decision-making with minimal human oversight.
+These traits indicate that the system goes beyond static workflows or reactive assistance.
+If not explicitly confirmed but reasonably inferred from strong contextual evidence, consider “Maybe”, especially when aligned with strong indicators.
+
+Strong Indicators
+(Use to strengthen judgment when core condition is partially implied or supporting traits are unclear. At least one is recommended in ambiguous cases.)
+1.  Makes independent decisions and acts without continuous user prompts.
+2.  Adapts to context or changing environments in a goal-directed manner.
+3.  Plans and executes multi-step workflows with internal reasoning.
+4.  Involves multiple intelligent agents or collaborative AI systems.
+5.  Employs reinforcement learning or other sequential decision-making methods.
+6.  Operates toward defined goals or missions — not just executing predefined rules or triggers.
+If strong indicators are present and the Mandatory Core Condition is reasonably implied, classify as “Yes.”
+
+Inclusions (Only consider if both Mandatory Core Condition is met/implied and at least one Strong Indicator is present):
+1.  Companies offering agentic AI as their primary product or platform (e.g., Devin, Parloa, Sierra, Hippocratic AI).
+2.  Companies that enable the creation, deployment, or orchestration of autonomous agents as software tools or platforms, not as integrated robotic hardware systems (e.g., AgentOps, Superagent, Orq.ai).
+3.  Companies operating in the agentic AI value chain, specifically focusing on infrastructure, dev tools, runtimes, frameworks, or applications for agentic AI where the end product or core focus is software for software agents, or software to manage software agents, not directly physical robotics. If the Software is used in autonomous robots , drones or other hardware then it will be a strictly """"No"""" case.
+4.  Core products involving:
+     - Agent Memory / Context Systems (e.g., Mem0, Cognee)
+     - Agent Runtimes or Execution Engines (e.g., Autogen, LangChain)
+     - PromptOps, Synthetic Data, Simulations specifically for agentic AI systems (e.g., Dust.tt)
+     - Multi-agent orchestration (e.g., AgentOS)
+     - Agent Observability, Evaluation, Security, Guardrails for agentic AI.
+     - Agent Frameworks & Dev Platforms (e.g., LangChain, CrewAI, Superagent).
+     - Use of terms like “Autonomous Agents,” “AI Workers,” “Task Runners,” etc., only when backed by clear evidence of actual agentic behavior as defined.
+
+Exclusions (Automatic “No” if any of the following apply):
+1.  Company is primarily a consultancy, service, or integration firm without proprietary agentic AI technology as its core offering.
+2.  AI capabilities are limited to third-party integrations, not built in-house with proprietary agentic functionality.
+3.  Agentic AI is an add-on feature, optional feature, or embedded assistant within a larger platform, especially if that platform's primary function is not agentic AI itself. Also exclude if the AI's 'agency' is solely within the context of enhancing a non-agentic core product, rather than acting as a standalone, goal-driven agent.
+4.  Systems rely on RPA or static rule-based automation without learning, adaptability, or autonomous initiation.
+5.  Assistants or copilots require continuous user prompting and do not demonstrate autonomous task initiation or independent action.
+6.  Focus is on pure hardware or robotics firms with no core software-based agentic autonomy component.
+7.  No clear evidence of autonomous initiation of tasks, decision-making, or goal-driven self-directed action.
+8.  Strict Rule - Any company whose primary product or core offering is physical hardware (e.g., robots, drones, autonomous vehicles, manufacturing machinery, sensors, IoT devices, or components like chips). This includes companies that design, manufacture, or sell such physical products, even if those products incorporate AI or are described as 'smart' or 'autonomous.
+9.  Strict Rule - Exclude IOT - internet of things / Automation Companies
+10. Strct Rule - Any company whose primary product or core offering is software that directly controls, operates, or enables the physical movement, manipulation, or autonomous action of hardware devices (e.g., robotic operating systems, drone flight control software, autonomous vehicle driving software, industrial automation software that directly commands machinery). This explicitly excludes companies whose AI, while sophisticated, is fundamentally designed to enable physical agents to act in the real world
+11. Strict Rule - Companies offering 'Robot-as-a-Service' (RaaS) or similar models where the core service involves the deployment and operation of proprietary physical robots/hardware, even if the intelligence driving these robots is AI-powered. The focus here is on the delivery of a physical robotic solution, not a pure software agent.
+12. Do not miss this Rule - If it is making Ai or software for Robots or Drones - directly mark it as """"No"""". 
+
+Maybe Conditions -
+Important:  if any of these conditions is satisfied ONLY when exclusion conditions are not met then mark """"Maybe"""":
+- When agentic traits are partially demonstrated or strongly implied, but some ambiguity remains — especially around autonomy or planning
+- If not explicitly confirmed but reasonably inferred from strong contextual evidence, consider “Maybe”,only when aligned with strong indicators.
+- Evidence is Partial/Implicit - Autonomy is implied in product flows but not explicitly confirmed in documentation.
+- Human-in-the-Loop Gating - System shows planning and multi-step execution but requires human approval for actions.
+- New/Beta/Private Access - Claims agentic behavior, but product is in beta/waitlist with limited public details.
+- Multi-Product Ambiguity - One product/module suggests agents, but unclear if it is the company’s core offering.
+- Build-Enabling but Unclear Default - Platform can support agents, but docs/examples focus on general LLM apps as well.
+- Terminology vs. Behavior Gap - Uses terms like ‘agents/AI workers,’ but examples show reactive assistance with limited autonomy.
+- Third-Party Alignment Missing - External sources suggest autonomy, but company’s official product pages lack detail.
+- Agentic Value-Chain Ambiguity - Claims agent-focused infra/guardrails, but scope overlaps with general LLM tooling.
+- Event- / Trigger-Driven Initiation - Agents run via schedules/triggers, but docs don’t confirm independent decision-making.
+- Open-Source with Sparse Docs - Open-source repo claims agent framework, but lacks concrete autonomous examples.
+- If a system demonstrates autonomous decision-making and adaptation but only within a narrowly scoped optimization problem (e.g., pricing, scheduling, routing) without broader goal-driven planning or multi-domain agency, classify as “Maybe.”
+- Unclear Autonomy in Software Development – Companies that present AI-based no-code or low-code platforms claiming autonomous app/code creation or modification, but where it is uncertain if the system has true agentic autonomy vs. advanced automation.
+- “If the company is primarily in early-stage R&D, prototypes, or simulation environments without clear commercialized or deployable agentic AI products, classify as Maybe
+
+Acceptable Sources (Allowed for classification):
+1.  The company’s own website (homepage, subpages, official documentation, support/help center, blogs, product microsites/subdomains).
+2.  Official GitHub repositories controlled by the company.
+3.  Official accelerator or investor program listings (e.g., Y Combinator, Techstars) only if linked from the official site or explicitly cited on domains controlled by the company, or if they clearly demonstrate autonomous, goal-driven AI capability.
+4.  Public content clearly controlled, maintained, or published by the company (e.g., official product walkthroughs, demos, interviews, podcasts where product details are clearly shown).
+5.  VC blogs (e.g., a16z, Sequoia) only if providing clear, explicit details about the company's agentic AI product that align with information on the company's official channels.
+
+Things to Avoid (Do Not Use / Do Not Infer):
+1.  News articles, analyst coverage, general press releases, speculative interviews, or editorial write-ups not controlled by the company for primary evidence.
+2.  Claims found only in third-party press or marketing that are not substantiated by the company's own official sources.
+3.  Generic marketing or vision decks without concrete product details demonstrating agentic capabilities.
+4.  Buzzwords like “AI-first”, “AI agent”, “AI-powered” unless explicitly backed by true agentic capabilities as defined.
+5.  Roadmap or R&D mentions unless confirmed as implemented and demonstrable in core product documentation.
+6.  Inferring or speculating; classification must rest on documented and explicit evidence.
+7.  Tools with general AI infrastructure only (e.g., Groq) are """"No"""" if agentic AI is not a primary or core use case for the product.
+
+Final Judgment Guidance
+- Yes → When the product clearly demonstrates or strongly implies autonomous, goal-directed behavior, even if some traits are inferred rather than explicitly confirmed.
+- Maybe → When agentic traits are partially demonstrated or strongly implied, but some ambiguity remains — especially around autonomy or planning. Confidence should be higher if multiple strong indicators are present.
+- No → When there is no clear or implied evidence of autonomous task initiation, planning, or adaptation — even if the company uses AI, copilots, or assistants.
+
+Output Format (Strict – No extra explanation or commentary):
+
+[Serial No] | [Domain] | [Yes / No / Maybe] | [1-liner justification explaining why based on the criteria]
+- Example:
+1 | tracxn.com | No | It is a market intelligence platform and not an Agentic AI company based on its core product.
+
+Domain Name - YY
+
+Website Extract - XX
+"""
+Non-Working - Gemini 3.0 <> Core offering,"Act as an experienced business analyst specializing in startup and market research. I will provide you company name and company website as Input. Based on the information available on their website and other reliable sources, produce a clear and well-structured analysis in paragraph format covering the following aspects:
+
+1. Core Value Proposition: Explain the primary problem the company is solving and the value it delivers to customers.
+2. Product/Service Suite: Describe the company’s main products or services and how they work.
+3. Target Market: Identify the primary industry or market the company operates in.
+4. Business Model: Explain how the company generates revenue (pricing, subscription, marketplace, SaaS, etc.).
+
+Ensure the analysis is concise, insight-driven, and written in professional paragraph form suitable for a business report.
+
+Company Name & Website: AAPKI-RASOI.COM & aapki-rasoi.com"
+SS -- Feed Relavence - Type B,"You are a Senior Financial Regulatory Analyst specializing in global banking licenses and market research.
+
+Task: You will be given the domain and its web extract to determine if the domain belongs to the feed ""Bank"" or not.
+Domain: XXX
+Website Extract: YYY
+
+**IMPORTANT SOURCE RULE (CRITICAL)
+
+- Use ONLY the information explicitly present in the provided Feed Definition and web extract given below.
+- Do NOT rely on prior knowledge, assumptions, training data, brand familiarity, or external sources.
+- Do NOT infer, extrapolate, or supplement missing information.
+- If information is unclear or insufficient, treat it as not present.
+
+**CRITICAL CLASSIFICATION REQUIREMENTS (MUST FOLLOW STRICTLY)
+You must first determine the company's core product offering before generating output.
+You must classify the company into exactly one of the following categories:
+
+1) A licensed and regulated BANK (physical financial institution)
+2) A financial service company that provides services to banks, financial institutions, or other clients. Companies providing loans or investments but explicitly stating they do not have a banking license or are regulated under non-banking acts (e.g.,""Regulated as an NBFC"" or ""Company Act"")
+3) A company that is not relevant to the banking or financial services industry
+4) A service company offering implementation, outsourcing, consulting, technology platforms that exist mainly to enable service delivery
+
+Feed Definition (IMPORTANT):
+To be classified as a Bank, the entity MUST :
+
+1)Hold a formal and verifiable banking license OR
+2)Operate as a regulated deposit-taking financial institution OR
+3)Provide core banking products directly to customers.
+
+- The major categories include:
+1) Commercial Banks
+2) Co-Operative Banks (Credit Unions, Building societies, Savings bank)
+3) Digital Banks
+4) Special Purpose Banks (Islamic Bank, Rural Bank, Women bank, etc)
+
+
+**FEED QUALIFICATION DECISION (MANDATORY – DO NOT OUTPUT INTERNAL REASONING)
+
+Before giving the output, internally determine whether the company clearly belongs to the ""Banks"" feed based STRICTLY on the Feed Definition and web extract given below:
+
+- Output “Yes” only if the company clearly and directly meets the Feed Definition based solely on the provided web extract.
+- If alignment is partial, implied, indirect, or ambiguous, treat the FeedOutput as **No**.
+- Do NOT classify as “Yes” based on generic financial terms or loosely related activities.
+
+
+Output Format:
+Name of the Bank | Is it a Bank (Yes or No) | One line reasoning on basic details of the bank
+
+Eg: SBI | Yes | Commercial Bank regulated by RBI providing banking services to retail and commercial users.
+Domain: velob"
+SS-- BM Prediction -- Type B,"You are a Lead Market Researcher working at a company. You will be given a professional description of a company's business. 
+act as a Lead Market Researcher working at a company, with the above given description about a companys business and a list of Business models as multiple series of nodes seprated by >. Each node representing one of sector, product. You must review each and every one of them and pick a Business model from the list given below which best represents the domains business.
+
+Company Description:
+XX
+
+BMPathstr
+Final Output should be strictly limited to the options given in the list above.
+Final Output Format - Final Output should strictly be the Serial number of the above options and a 4 line explanation for the given output.
+ No other extra text or string should be there. 
+Example: """"""""5"""""""",""""""""-"""""""",""""""""Explanation - 4 Line summary"""""""""""""""
+SS -- Feed Relavence - Type C,"""Role:You are a Lead Market Research Analyst.
+Your job is to evaluate if a company qualifies as a Hospital based on strict Hospital definition
+
+Determine whether the company fits into the Hospital Feed.
+Use ONLY the information present in the provided text.
+Do NOT assume, infer, or use external knowledge.
+
+Definition of Hospital:
+A Hospital is a company that provides secondary or tertiary medical care through inpatient healthcare facilities. These facilities offer specialist-led treatment, surgeries, or advanced clinical services beyond basic outpatient care. Explicit mention of 24/7 emergency services or IPD is not required, but the nature of services must clearly indicate hospital-level operations.
+
+Inclusion Criteria:
+A company is included if the description explicitly shows:
+1. Hospital-Level Operations: The facilities must offer inpatient care, surgeries, or 24/7 clinical services.
+2. Medical Institute / University / School with Hospital Network: If the text shows that a medical institute, university, or school operates teaching hospital under its administrative, it qualifies as a Hospital, provided hospital-level services are described at the institutional level.
+3. Rehabilitation Hospitals: A company qualifies if it is a full-fledged Rehabilitation Hospital that provide inpatient rehabilitation under medical supervision.
+Outpatient rehab centers, day-care physiotherapy units, therapy studios, and SMR-type proximity rehab centers do NOT qualify.
+4. Any of the following hospital types are allowed:
+a). Single-Specialty Hospital
+b). Multi-Specialty Hospital
+c). Alternative Medicine Hospital (Ayurveda, Homeopathy, TCM, Naturopathy, etc.)
+d). Veterinary/Animal Hospital
+
+Exclusion Criteria:
+A company is excluded if the description shows ANY of the following:
+1. Companies that only partner with external hospital networks OR operate as hospital departments/services: Exclude companies that function as departments, subspecialty groups, or medical units operating within a larger hospital system. Also exclude facilities described as """"""""""""""""Satellite Centers"""""""""""""""", """"""""""""""""Extension Centers,"""""""""""""""" """"""""""""""""Information Centers"""""""""""""""", or """"""""""""""""Collection Centers"""""""""""""""" if they primarily serve as feeders to a main hospital or operate in association with external networks rather than being full-fledged independent hospital campuses.
+2. Exclude any company that operates as a clinic, chikitsalaya or single-location treatment facility
+3. Day-care and Outpatient-only facilities: Exclude any company that operates primarily as a clinic, chikitsalaya, or wellness center with restricted operating hours (e.g., 9 AM - 6 PM). 
+4. Template-based or Placeholder Services: Exclude companies where high-level hospital terms (like """"""""""""""""Intensive Care"""""""""""""""" or """"""""""""""""Hospice"""""""""""""""") appear only in generic website templates (often accompanied by """"""""""""""""Lorem Ipsum""""""""""""""""or irrelevant filler text) but are contradicted by stated operating hours or descriptions of """"""""""""""""consultation-only"""""""""""""""" practices.
+5. Diagnostic and Procedural Centers: Facilities focusing solely on diagnostic tests, minor same-day procedures (like bloodletting or basic Panchakarma), or preventative wellness without the infrastructure for multi-day inpatient recovery and around-the-clock nursing should be excluded.
+6. Veterinary clinics/ centers/ practices: (Note: Veterinary Hospitals remain included as per Inclusion Criteria, but small practices/clinics are excluded).
+7. Proximity, Rehab, and Long-Term Care Centers: Exclude facilities primarily focused on proximity medicine (SMR-type), basic rehab without hospital-level services, nursing homes (EHPAD), long-term geriatric care (USLD), or disability housing (MAS). Even if called a “Hospital,” exclude any facility that lacks secondary/tertiary medical units, lacks inpatient surgical capability, or focuses mainly on recovery, convalescence, assisted living, elderly care, social care, or senior living rather than true clinical hospital operations. Rehabilitation centers qualify only if they meet the Inclusion Criterion for Rehabilitation Hospitals.
+8. Management, Consulting, and Service Providers: Exclude companies that provide professional management, staffing, consulting, or advisory services to hospitals owned by third parties (e.g., """"""""""""""""we manage hospitals for health districts"""""""""""""""" or """"""""""""""""integrated physician-hospital organizations""""""""""""""""). These companies do not independently own or operate the hospital infrastructure themselves.
+9. Non-Provider Entities: Exclude Health-Tech/Software platforms (no physical beds), Foundations/Charities (funding/advocacy only), and Administrative Service Providers (billing, IT, or staffing) that do not directly own and operate the hospital infrastructure.
+10.Primary Domain Strictness: Always evaluate ONLY the given website. Exclude any website that is not the primary patient-care hospital portal. This includes academic (.edu/.ac) domains, corporate/institutional sites, career/HR portals, blogs, reports, foundations, doctor-only pages, and any subdomain or redirected portal requiring navigation to a main hospital site.
+Even if a hospital is mentioned or operated elsewhere, return No if the given domain itself is not the clinical hospital website.
+
+Classification Framework (3-Step Decision Check):
+Step 1 >>> FILTER (Eligibility)
+Company must meet BOTH:
+> Clear evidence of hospital-level treatment services
+If missing → No
+
+Step 2  >>> VERIFY (Exclusion Screening)
+Company is rejected if described as:
+>Clinic / OPD-only / Day-care / Wellness
+>Diagnostic-only
+>Tie-up or partner-only model
+>Any service that is not hospital-grade
+If any exclusion applies → No
+
+Step 3 >>>  OUTPUT
+If it passes all the criteria for Hospital : Yes (with one line reasoning) 
+If it is a Hospital operating from more than 2 locations: Yes - Chain
+If not: No (with one line proper reasoning) 
+No other text, explanation, or string is allowed.
+
+Provide your final classification based on:
+
+Domain: XXX
+Extract: YYY                
+"""
+SS -- Feed Relavence - Type A,"""AI INFRASTRUCTURE CLASSIFICATION SYSTEM
+Temperature = 0
+
+[SECTION 1: OBJECTIVE & DEFAULT ASSUMPTION]
+
+ROLE: You are a Lead Market Research Analyst specializing in AI infrastructure markets.
+
+TASK: Classify a company into ONE feed based strictly on its core commercial product.
+
+INPUT:
+- Domain Name with URL: XXX
+- Company Website extract: YYY
+
+DEFAULT ASSUMPTION: **Classify as 'Software Infrastructure' unless definitive evidence proves it is 'AI Infrastructure.'**
+
+REASONING MANDATE:
+You must explicitly state which criteria were met and provide URLs/product names as evidence.
+Do NOT rely on marketing buzzwords. Focus on observable product characteristics.
+
+[SECTION 2: IMMEDIATE DISQUALIFICATIONS - Check First]
+
+If ANY of these apply, STOP and classify as 'Software Infrastructure':
+
+* END-USER APPLICATIONS
+a. Primary buyer is NOT a developer/ML engineer (check homepage hero + pricing page)
+b. Marketing emphasizes business outcomes ('increase sales,' 'automate support') not technical capabilities
+c. Vertical SaaS (legal, recruiting, marketing, etc.) even if AI-powered internally
+d. Consumer apps, browser extensions, plugins
+e. 'AI assistants' for specific job functions (writing, coding help for non-devs, etc.)
+
+* NO-CODE APP BUILDERS FOR BUSINESS USERS
+a. Tagline includes 'build AI [solution] without code' targeting business users
+b. Features like 'drag-and-drop chatbot builder,' 'create your own AI agent'
+c. Can a non-technical person deploy the output? → Yes = Exclude
+
+* CONSULTING & SERVICES-HEAVY COMPANIES
+a. Homepage CTA is 'Contact Sales' / 'Schedule Consultation' (not 'Sign Up' / 'API Docs')
+b. No self-service pricing or free tier
+c. Case studies emphasize 'our team delivered,' 'custom solutions,' 'strategic partnership'
+d. Product documentation <20 pages or mostly marketing fluff
+e. LinkedIn workforce >60% in 'consulting,' 'solutions,' 'advisory,' 'services'
+
+* MODEL WRAPPERS & UI LAYERS
+a. >80% of value is a pre-built UI for someone else's model (OpenAI, Stability, etc.)
+b. Image/video/audio tools with no developer platform (upscalers, generators, editors)
+c. Could swap underlying model provider in <1 week → Wrapper
+d. No SDK, API, or integration capabilities
+
+* GENERAL DEVOPS / DATA INFRASTRUCTURE
+a. Core product is ETL, data warehousing, BI, or general observability
+b. Works for ANY workload (not AI-specific) - e.g., Fivetran, Airbyte, Datadog
+c. Data governance, catalogs, or compliance tools (Collibra, Alation)
+d. General developer tools (CI/CD, deployment, hosting) - Vercel, Netlify, CircleCI
+
+* NON-PRODUCTIZED OFFERINGS
+a. Manual services (data labeling, annotation) without automation platform
+b. Pure consulting, research, or advisory (no reusable software/API)
+c. API resellers with no proprietary infrastructure
+d. Open-source project with no commercial product or cloud service
+
+
+[SECTION 3: AI INFRASTRUCTURE INCLUSION CRITERIA]
+
+To classify as 'AI Infrastructure,' company must meet PRIMARY BUYER TEST + 2+ Technical Criteria.
+
+─────────────────────────────────────────────
+PRIMARY BUYER TEST (Mandatory)
+─────────────────────────────────────────────
+The economic buyer must be:
+* AI/ML Engineer, ML Platform Team, AI Architect, MLOps Engineer
+* Data Scientist building models (not analyzing business data)
+* AI Product Managers managing model infrastructure
+
+EVIDENCE REQUIRED (2+ of these):
+- Pricing page shows 'per API call,' 'per GPU hour,' 'per model endpoint,' 'per token'
+- Documentation has sections for 'Developers,' 'API Reference,' 'Integrations'
+- Homepage speaks to developers: 'integrate,' 'deploy,' 'API,' 'SDK,' 'orchestrate'
+- Job listings emphasize AI/ML engineering roles, not sales/marketing/consulting
+- Case studies feature tech companies building AI products (not enterprises 'using AI')
+
+─────────────────────────────────────────────
+TECHNICAL INCLUSION CRITERIA (Need 1 aleast)
+─────────────────────────────────────────────
+
+* COMPUTE & HARDWARE
+- GPU cloud providers (specialized clusters, not generic VMs)
+- AI-optimized chips/accelerators (TPUs, custom silicon)
+- High-performance computing for model training
+EVIDENCE: Pricing per GPU/TPU hour, cluster orchestration docs
+
+* MODEL DEVELOPMENT & LIFECYCLE
+- Model training, fine-tuning, or serving platforms
+- MLOps platforms (experiment tracking, versioning, deployment)
+- ML frameworks, distributed training infrastructure
+- Model registries, model management systems
+EVIDENCE: SDK for model deployment, integration with PyTorch/TensorFlow, model versioning features
+
+* DEVELOPER PLATFORMS FOR MODEL ACCESS
+- Companies that BUILD models AND sell them via developer APIs (OpenAI, Anthropic, Cohere)
+- NOT resellers - must own/train the models
+EVIDENCE: API docs showing model endpoints, rate limits, pricing per token/call
+
+* VECTOR & EMBEDDING INFRASTRUCTURE
+- Vector databases where vector search is the PRIMARY query method
+- Embedding generation services with developer APIs
+- Requires integration via code (Python SDK minimum)
+EVIDENCE: Vector similarity search docs, embedding API, code examples
+
+* AI-NATIVE DATA PLATFORMS (Narrow Definition)
+- Synthetic data generation FOR model training (not general test data)
+- Data annotation/labeling PLATFORMS with workflow automation + APIs
+- Feature stores for ML (not general data catalogs)
+- Data providers selling datasets FOR model training with licensing for commercial use
+EVIDENCE: 'Training data,' 'fine-tuning datasets,' 'benchmark datasets,' API for dataset access
+
+* SPECIALIZED AI OBSERVABILITY & GOVERNANCE
+- Model monitoring (drift detection, performance degradation, A/B testing for models)
+- LLM-specific: prompt tracking, token usage, hallucination detection, output quality
+- Model explainability, fairness testing, bias detection
+- NOT general APM or server monitoring (even if they add 'AI insights')
+EVIDENCE: Model-specific metrics, A/B testing for model versions, prompt analytics
+
+* AI ORCHESTRATION & INTEGRATION
+- ML pipeline orchestration (Kubeflow, MLflow)
+- LLM orchestration frameworks (SDKs for chaining models, not no-code builders)
+- MCP (Model Context Protocol) servers/connectors FOR DEVELOPERS
+- Privacy-preserving ML infrastructure (federated learning, homomorphic encryption for ML)
+EVIDENCE: Workflow DAGs for ML, SDK for LLM chaining, MCP protocol implementation
+
+* AI INFRASTRUCTURE TOOLING
+- IDEs/notebooks specialized for ML/AI (not general code editors with AI features)
+- Prompt engineering platforms for DEVELOPERS (version control, testing, deployment)
+- AI security platforms (model extraction defense, adversarial robustness, input validation)
+EVIDENCE: Jupyter integration, prompt versioning API, model security testing tools
+
+─────────────────────────────────────────────
+SPECIAL CATEGORY: DATA PROVIDERS FOR AI
+─────────────────────────────────────────────
+Include if company sells datasets AND meets 3+ criteria:
+
+✓ Labeled/annotated data (bounding boxes, transcriptions, sentiment tags, etc.)
+✓ Explicitly marketed for 'model training,' 'fine-tuning,' or 'benchmarking'
+✓ Commercial licensing for training (not just 'data for analysis')
+✓ API access or programmatic download (not just manual CSV exports)
+✓ Developer-focused documentation mentioning ML use cases
+✓ Pricing per dataset/volume (not per user seat)
+
+Exclude: General business data (CRM, market research, financial data) even if 'AI-ready'
+
+
+[SECTION 4: MANDATORY DECISION PROCESS]
+
+
+Follow these steps IN ORDER. Stop at first 'No':
+
+ STEP 1: DISQUALIFICATION CHECK 
+ Does company match ANY disqualification in Section 2? 
+ → YES: Classify as 'Software Infrastructure' (STOP) 
+ → NO: Proceed to Step 2 
+
+ STEP 2: PRIMARY BUYER TEST 
+ Is the primary buyer an AI/ML Engineer or ML Platform team?
+ (Check homepage, pricing page, job listings, case studies) 
+ → NO: Classify as 'Software Infrastructure' (STOP) 
+ → YES: Proceed to Step 3 
+
+
+ STEP 3: TECHNICAL CRITERIA COUNT 
+ How many Technical Inclusion Criteria (Section 3) are met? 
+ → 0: Classify as 'Software Infrastructure' 
+ → 1+: Classify as 'AI Infrastructure' 
+
+ STEP 4: EVIDENCE VERIFICATION 
+ For each criterion claimed, cite specific evidence: 
+ • URL of documentation/pricing page 
+ • Exact product/feature name 
+ • Direct quote (if applicable) 
+ If evidence is weak/absent, DO NOT count that criterion 
+
+
+ STEP 5: CONFIDENCE CALIBRATION 
+ 90-100: 3+ criteria + strong evidence + zero disqual flags 
+ 70-89: 2 criteria + moderate evidence + minor ambiguity 
+ 50-69: Borderline case, flag for manual review 
+ 0-49: Should have stopped earlier; recheck steps 1-2 
+
+
+
+[SECTION 5: TIE-BREAKING HIERARCHY]
+
+When signals conflict, apply in this priority order:
+
+1. **Economic Buyer > Technical Architecture**
+If marketed to end-users (even with AI tech stack) → Software Infrastructure
+
+2. **Developer Platform Evidence > Marketing Claims**
+Require SDK/API docs, not just claims of 'developer-friendly'
+
+3. **Product > Services**
+If >40% revenue from consulting/services → Software Infrastructure
+
+4. **Exclusions > Inclusions**
+When in doubt, classify as 'Software Infrastructure'
+
+
+[SECTION 6: OUTPUT FORMAT - STRICT COMPLIANCE]
+
+
+<Yes/No>
+Explanation - <15 words explanation>
+
+Example outputs
+
+No
+Explanation - Primary buyer is not a developer/ML engineer; product is an end-user AI assistant for frontline operations.
+
+Yes
+Explanation - Impala provides a hyperscaled AI inference engine with managed endpoints, targeting ML engineers for model deployment and scaling.
+
+Yes
+Explanation - Provides a developer platform for high-speed AI model inference, fine-tuning, and GPU access.
+
+[SECTION 7: SELF-VERIFICATION CHECKLIST]
+
+
+Before finalizing classification, confirm:
+
+- I checked Section 2 disqualifications FIRST
+- I identified the PRIMARY economic buyer (not secondary users)
+- I verified technical criteria with actual URLs/product names (not assumptions)
+- I did NOT count marketing buzzwords as evidence
+- If classified as AI Infrastructure, I can point to developer docs/API
+- If classified as Software Infrastructure, I can state which disqualification applied
+- My confidence score matches the evidence quality (weak evidence = low confidence)
+- I applied tie-breaking rules when signals conflicted
+"""
+SS-- BM Prediction -- Type A,"""You are a Lead Market Researcher working at a company.
+
+You will be given a professional description of a company's business. Your task is to classify it into the most appropriate Business Model from the provided list.
+
+-------------------------------------------------------------------------------
+
+Company Description:
+YY
+
+You are now given a list of Business Models represented as hierarchical paths using “>”, where each node represents a sector, category, or product type.
+
+List of Business Models with their respective serial numbers and definitions:
+BM_Paths
+
+-------------------------------------------------------------------------------
+
+MANDATORY INTERNAL CLASSIFICATION STEP (DO NOT OUTPUT)
+
+Before selecting a Business Model, internally perform the following steps using ONLY the Company Description:
+
+1. Identify the company’s PRIMARY customer-facing offering.
+2. Determine whether the company primarily delivers:
+   - Software products or platforms
+   - Hardware products
+   - Technology-enabled services or outsourcing
+3. Ignore internal tools, internal infrastructure, R&D processes, or operational systems unless they are explicitly sold as products or services.
+4. If the company offers multiple capabilities, select the ONE that best represents the primary revenue-driving or core business function.
+
+-------------------------------------------------------------------------------
+
+TAXONOMY DISAMBIGUATION RULES (STRICT)
+
+- Prefer the MOST SPECIFIC applicable Business Model over broader or parent categories.
+- Do NOT classify into a category unless the offering is explicitly described.
+- Distinguish clearly between:
+  - Platforms vs services
+  - Data extraction vs data pipelines vs training data platforms
+  - Model development vs model deployment vs model monitoring
+- Classify as “Tech Enabled Outsourcing” ONLY if human-led execution is central to the offering.
+- Do NOT select “Full Stack” unless BOTH hardware and software offerings are explicitly stated.
+- If no Business Model clearly and exactly matches the company’s offerings, return “No Results”.
+
+-------------------------------------------------------------------------------
+
+UNIFIED RULE: BUSINESS MODEL CLASSIFICATION GUIDELINES  
+(STRICT ADHERENCE REQUIRED)
+
+1. Classification must be precise, logic-driven, and based strictly on actual offerings.
+2. Do NOT use keyword or phrase matching.
+3. Select ONLY ONE Business Model.
+4. Consider ONLY the Business Model path text BEFORE the “-” symbol.
+5. Ensure semantic alignment with the company’s described functions.
+6. Avoid overgeneralization or loose associations.
+7. Maintain consistent judgment across all classifications.
+8. If no exact match exists, return “No Results” with one-line explanation.
+9. Follow the output format exactly.
+
+-------------------------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT)
+
+""""<Serial Number> <Business Model from list>"""", 
+""""Explanation - <Four-sentence factual justification based ONLY on the Company Description>,FeedOutput-yes""""
+
+-------------------------------------------------------------------------------
+
+EXAMPLE OUTPUT (FORMAT ONLY)
+
+14 Mom & Baby Care > Commerce, 
+Explanation - The company operates an online retail platform focused on products for infants and parents. Its offerings include consumer goods sold directly through a digital storefront. The business facilitates transactions between the company and end consumers. This aligns with the Commerce business model as defined.,FeedOutput-yes"""
+SR -- Feed Relavence,"""You are a Lead Market Researcher working at a company.
+
+You will be given a Feed Definition and a Company Description. Your task is to determine whether the company belongs to the Feed.
+
+-------------------------------------------------------------------------------
+
+IMPORTANT SOURCE RULE (CRITICAL)
+
+- Use ONLY the information explicitly present in the provided Feed Definition and Company Description.
+- Do NOT rely on prior knowledge, assumptions, training data, brand familiarity, or external sources.
+- Do NOT infer, extrapolate, or supplement missing information.
+- If information is unclear or insufficient, treat it as not present.
+
+-------------------------------------------------------------------------------
+
+Feed Definition:
+Only online-first companies and companies offers proprietary tech product or solution will be covered in this Feed. Companies which provide self-paced and instructor led courses and learning resources for professional learning, skill development and casual learning.  Includes the following types of companies :
+a) Online platforms providing for students to manage and showcase their educational achievements.
+b)  that are creating tech first institutions to educate students on subjects such as IT, Business Management, etc.
+c)  providing courses and educational resources for vocational training for web development, management, HR, IT, etc
+d)  providing courses and educational resources for vocational training
+e)  providing online learning platforms for personality and self development
+f)  providing management software for instructors to teach course online and manage their business
+g)  providing business management software to vocational training centers for music, dance etc
+
+------------------------------------------------------------
+
+INPUTS
+
+Feed Definition:
+XX
+
+Company Description:
+YY
+
+------------------------------------------------------------
+
+FEED DECISION RULE (MANDATORY)
+
+- Output YES only if the company’s primary offering explicitly matches the Feed Definition.
+- If alignment is partial, indirect, implied, or ambiguous → treat as NO.
+- Do NOT rely on keywords or loose similarity.
+
+------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT)
+
+If NOT part of feed:
+No Results, Explanation - <one factual sentence explaining why it does not match>
+
+If part of feed:
+Yes, Explanation - <one factual sentence explaining why it matches>
+
+------------------------------------------------------------
+
+OUTPUT RULES
+
+- Do NOT include reasoning steps
+- Do NOT add extra commentary
+- Use only information present in inputs"""
+SR-- BM Prediction,"""You are a Lead Market Researcher working at a company.
+
+You will be given a Company Description and a list of Business Models.
+
+Your task is to classify the company into the most appropriate Business Model.
+
+------------------------------------------------------------
+
+IMPORTANT SOURCE RULE (CRITICAL)
+
+Use ONLY the Company Description provided.
+Do NOT use external knowledge, assumptions, training data, or inference beyond the text.
+Do NOT add missing information.
+
+------------------------------------------------------------
+
+INPUTS
+
+Company Description:
+XX
+
+Business Model List:
+YY
+
+-------------------------------------------------------------------------------
+
+MANDATORY INTERNAL CLASSIFICATION STEP (DO NOT OUTPUT)
+
+Before selecting a Business Model, internally perform the following steps using ONLY the Company Description:
+
+1. Identify the company’s PRIMARY customer-facing offering.
+2. Determine whether the company primarily delivers:
+   - Software products or platforms
+   - Hardware products
+   - Technology-enabled services or outsourcing
+3. Ignore internal tools, internal infrastructure, R&D processes, or operational systems unless they are explicitly sold as products or services.
+4. If the company offers multiple capabilities, select the ONE that best represents the primary revenue-driving or core business function.
+
+-------------------------------------------------------------------------------
+
+TAXONOMY DISAMBIGUATION RULES (STRICT)
+
+- Prefer the MOST SPECIFIC applicable Business Model over broader or parent categories.
+- Do NOT classify into a category unless the offering is explicitly described.
+- Distinguish clearly between:
+  - Platforms vs services
+  - Data extraction vs data pipelines vs training data platforms
+  - Model development vs model deployment vs model monitoring
+- Classify as “Tech Enabled Outsourcing” ONLY if human-led execution is central to the offering.
+- Do NOT select “Full Stack” unless BOTH hardware and software offerings are explicitly stated.
+- If no Business Model clearly and exactly matches the company’s offerings, return “No Results”.
+
+-------------------------------------------------------------------------------
+
+UNIFIED RULE: BUSINESS MODEL CLASSIFICATION GUIDELINES  
+(STRICT ADHERENCE REQUIRED)
+
+1. Classification must be precise, logic-driven, and based strictly on actual offerings.
+2. Do NOT use keyword or phrase matching.
+3. Select ONLY ONE Business Model.
+4. The Business Model must be selected strictly from the hierarchical Business Model path that appears before the “-” descriptive definition in the list, while the descriptive text after the dash should only be used to understand the category meaning and must not appear in the classification output.
+5. Ensure semantic alignment with the company’s described functions.
+6. Avoid overgeneralization or loose associations.
+7. Maintain consistent judgment across all classifications.
+8. If no exact match exists, return “No Results” with one-line explanation.
+9. Follow the output format exactly.
+
+-------------------------------------------------------------------------------
+
+OUTPUT FORMAT (STRICT)
+
+""""""""<Serial Number> <Business Model from list>"""""""", 
+""""""""Explanation - <Two-sentence factual justification based ONLY on the Company Description>,FeedOutput-yes""""""""
+
+-------------------------------------------------------------------------------
+
+EXAMPLE OUTPUT (FORMAT ONLY)
+
+14 Mom & Baby Care > Commerce, 
+Explanation - The company operates an online retail platform focused on products for infants and parents. Its offerings include consumer goods sold directly through a digital storefront..,FeedOutput-yes
+""""
+"""
