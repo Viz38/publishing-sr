@@ -211,13 +211,15 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
                 
                 usage = res.get("usageMetadata", {})
                 think_toks = usage.get("thoughtsTokenCount", usage.get("thoughts_token_count", usage.get("reasoningTokenCount", 0)))
-                logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)} | Think: {think_toks})")
+                cached_toks = usage.get("cachedContentTokenCount", usage.get("cached_content_token_count", 0))
+                logging.info(f"GEMINI RES: Success (Tokens: {usage.get('totalTokenCount', 0)} | Think: {think_toks} | Cache: {cached_toks})")
                 return LLMResult(
                     text=text,
                     thinking_text=thinking_text,
-                    prompt_tokens=usage.get("promptTokenCount", 0),
+                    prompt_tokens=max(0, usage.get("promptTokenCount", 0) - cached_toks),
                     candidate_tokens=usage.get("candidatesTokenCount", 0),
                     thinking_tokens=think_toks,
+                    cached_tokens=cached_toks,
                     success=True
                 )
         except Exception as e:
