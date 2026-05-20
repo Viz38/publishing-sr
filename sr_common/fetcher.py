@@ -108,7 +108,7 @@ class StealthFetcher:
         except Exception as e:
             logger.warning(f"TIER 3 ERR: {url} | {e}")
 
-        return None, 0, "Fetch failed across all tiers"
+        return None, 0, "Unable To Scrap"
 
     def _is_valid(self, content: str, min_len: int = 500) -> bool:
         if not content: return False

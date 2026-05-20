@@ -1,3 +1,29 @@
+## [2026-05-20] Full Ecosystem Migration to `uv` (Ultra-Fast Package Manager)
+Files changed:
+- control.sh
+Reason:
+Perform a 100% migration from `pip` and standard `venv` to `uv` to maximize dependency resolution speed and ensure extremely reliable, deterministic environment bootstraps across macOS and Ubuntu.
+Changes:
+1. **Interactive Auto-Installer**:
+   - Upgraded `control.sh` to universally detect the absence of `uv` and automatically fetch it from `astral.sh`.
+   - Injected absolute `uv` binary paths dynamically into the `$PATH` to allow immediate use without shell restarts.
+2. **Absolute Runner Execution**:
+   - Modified `create_runner()` to dynamically resolve the absolute path to `uv` (`$UV_PATH`) and hardcode it into the generated `runner.sh` daemon scripts. This guarantees bulletproof execution inside strict `launchd` and `systemd` environments where `$PATH` is highly isolated.
+3. **Legacy Pip Deprecation**:
+   - Entirely removed standard `python3 -m venv` and `pip install` fallbacks.
+   - Refactored `patchright` and `camoufox` bootstrapping to execute purely under `uv run python -m`.
+
+## [2026-05-20] Implement Force-Assign Funnel Step in Type A Pipeline
+Files changed:
+- TypeA/main.py
+- CHANGELOG.md
+Reason:
+Address common HTTP 400 "Funnel State Conflicts" failures by integrating the `/force-assign` prerequisite step into the Type A pipeline before performing domain profile funnel movements.
+Changes:
+1. **Integrated force-assign prior to move**:
+   - Added `/force-assign` PUT call to `TypeA/main.py` mimicking the validated, robust operational workflow of the Type B engine.
+   - Updated the move status writing to conditionally invoke `/move` only upon a successful `/force-assign` assignment response (HTTP 200/201), otherwise outputting "Assign Failed".
+
 ## [2026-05-19] Implement Explicit Gemini Context Caching & Token Analytics
 Files changed:
 - sr_common/models.py

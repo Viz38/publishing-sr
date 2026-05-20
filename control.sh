@@ -530,13 +530,17 @@ create_runner() {
     # Create empty log file if not exists
     touch "$f_path/Logs/api.logs"
     
+    # Resolve the absolute path to uv dynamically to ensure it never fails in systemd/launchd
+    export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+    local uv_bin_path=$(command -v uv)
+    
     cat <<EOF > "$runner"
 #!/bin/bash
 cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-"$BASE_DIR/.venv/bin/python" -m uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
+"$uv_bin_path" run uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
@@ -695,43 +699,50 @@ while true; do
         1) 
             if [ -z "$PYTHON_CMD" ]; then echo -e "${RED}Error: No Python 3.10+ found!${NC}"; sleep 3; continue; fi
             
-            # Check for uv
-            if command -v uv &> /dev/null; then
-                USE_UV=true
-                echo -e "${GREEN}⚡ 'uv' detected! Using ultra-fast dependency resolution.${NC}"
+            # Bulletproof Auto-Installer for uv (Injecting to PATH for instant availability)
+            export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+            if ! command -v uv &> /dev/null; then
+                echo -e "${YELLOW}⚠️  'uv' (ultra-fast package installer) is missing!${NC}"
+                echo -e "${BLUE}▶ Installing 'uv' globally...${NC}"
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+                export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+                if command -v uv &> /dev/null; then
+                    echo -e "${GREEN}✅ 'uv' installed successfully!${NC}"
+                else
+                    echo -e "${RED}❌ 'uv' installation failed. Exiting setup.${NC}"
+                    sleep 3
+                    continue
+                fi
             else
-                USE_UV=false
+                echo -e "${GREEN}⚡ 'uv' detected! Using ultra-fast dependency resolution.${NC}"
             fi
 
             echo -e "${BLUE}Initializing Unified Workspace Environment...${NC}"
             mkdir -p "$BASE_DIR/Logs"
             
-            # Use root .venv instead of 3 separate ones
-            if [ "$USE_UV" = true ]; then
-                [ ! -f "$BASE_DIR/.venv/bin/python" ] && uv venv "$BASE_DIR/.venv" --python "$PYTHON_CMD" --clear > /dev/null 2>&1
-                echo -e "   ▶ Installing dependencies via uv..."
-                uv pip install -r "TypeA/requirements.txt" --python "$BASE_DIR/.venv/bin/python" >> "$SETUP_LOG" 2>&1
-            else
-                [ ! -f "$BASE_DIR/.venv/bin/python" ] && $PYTHON_CMD -m venv "$BASE_DIR/.venv" --clear
-                echo -e "   ▶ Installing dependencies via pip..."
-                "$BASE_DIR/.venv/bin/python" -m pip install -r "TypeA/requirements.txt" --quiet >> "$SETUP_LOG" 2>&1
-            fi
+            [ ! -f "$BASE_DIR/.venv/bin/python" ] && uv venv "$BASE_DIR/.venv" --python "$PYTHON_CMD" --clear > /dev/null 2>&1
+            echo -e "   ▶ Installing dependencies via uv..."
+            uv pip install -r "TypeA/requirements.txt" --python "$BASE_DIR/.venv/bin/python" >> "$SETUP_LOG" 2>&1
 
             for f in "${FOLDERS[@]}"; do
                 mkdir -p "$f/Logs"
             done
             
             echo -e "${YELLOW}🌍 Installing Global Browser Binaries...${NC}"
+            
+            # Retrieve absolute path of uv to guarantee execution context
+            UV_PATH=$(command -v uv)
+            
             if [[ "$OS" == "Linux" ]]; then
                 echo -e "   ▶ Installing Linux-specific browser dependencies..."
-                "$BASE_DIR/.venv/bin/python" -m patchright install-deps >> "$SETUP_LOG" 2>&1
+                "$UV_PATH" run python -m patchright install-deps >> "$SETUP_LOG" 2>&1
             fi
             
             echo -e "   ▶ Downloading Patchright browsers (Chromium, Firefox)..."
-            "$BASE_DIR/.venv/bin/python" -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
+            "$UV_PATH" run python -m patchright install firefox chromium >> "$SETUP_LOG" 2>&1
             
             echo -e "   ▶ Downloading Camoufox Stealth Browser..."
-            "$BASE_DIR/.venv/bin/python" -m camoufox fetch >> "$SETUP_LOG" 2>&1
+            "$UV_PATH" run python -m camoufox fetch >> "$SETUP_LOG" 2>&1
             
             # Recreate respective credentials JSON files from .env automatically
             echo -e "${YELLOW}🔑 Auto-recreating Credentials JSON files from .env...${NC}"
