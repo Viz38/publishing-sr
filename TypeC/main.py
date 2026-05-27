@@ -328,7 +328,8 @@ class TypeCPipeline:
                 else: res = await process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager)
                 
                 if "tokens" in res:
-                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"]["think"], 'rows': res.get("llm_rows", 0), 'calls': res.get("llm_calls", 0)})
+                    is_success = res.get("type") == "success"
+                    await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"].get("think", 0), 'rows': res.get("llm_rows", 0) if is_success else 0, 'calls': res.get("llm_calls", 0) if is_success else 0})
                 
                 if res["type"] == "success":
                     r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
