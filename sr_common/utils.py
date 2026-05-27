@@ -216,7 +216,7 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
                 return LLMResult(
                     text=text,
                     thinking_text=thinking_text,
-                    prompt_tokens=max(0, usage.get("promptTokenCount", 0) - cached_toks),
+                    prompt_tokens=usage.get("promptTokenCount", 0),
                     candidate_tokens=usage.get("candidatesTokenCount", 0),
                     thinking_tokens=think_toks,
                     cached_tokens=cached_toks,

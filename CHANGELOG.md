@@ -1,3 +1,9 @@
+## [2026-05-27] Fix Token Tracking for Gemini Flash Lite
+Files changed:
+- sr_common/utils.py
+Reason:
+Stop subtracting cached tokens from promptTokenCount. Since Gemini Flash Lite prices cached tokens the same as standard tokens, the full `promptTokenCount` must be logged to accurately reflect billed tokens.
+
 ## [2026-05-20] Full Ecosystem Migration to `uv` (Ultra-Fast Package Manager)
 Files changed:
 - control.sh
