@@ -20,3 +20,5 @@ docs/
 External_Logs/
 docs/
 handoff.md
+prompts_output.txt
+prompt.csv
