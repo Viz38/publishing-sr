@@ -122,7 +122,11 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
-    html, _, reason = await fetcher.fetch(browser, f"https://{domain}")
+    html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+    if html is None:
+        pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
+        html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
+
     if html is None:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
         return {"type": "error", "reason": reason}
@@ -148,8 +152,8 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
-        sys_p1 = parts_p1[1].strip()
-        user_p1 = parts_p1[0].strip() + "\n\n" + body[:20000]
+        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body[:20000]
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
         res_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
     else:

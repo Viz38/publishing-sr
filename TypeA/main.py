@@ -124,10 +124,11 @@ def extract_links(html: str, base_url: str) -> Set[str]:
     if not html: return set()
     soup = BeautifulSoup(html, 'lxml')
     links = set()
-    domain = urlparse(base_url).netloc
+    domain = urlparse(base_url).netloc.replace('www.', '')
     for a in soup.find_all('a', href=True):
         url = urljoin(base_url, a['href'])
-        if urlparse(url).netloc == domain:
+        netloc = urlparse(url).netloc.replace('www.', '')
+        if netloc == domain:
             links.add(url.split('#')[0].rstrip('/'))
     return links
 
@@ -136,7 +137,11 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     pipeline_logger.info(f"PROCESS START: {domain}")
     dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
     
-    html, _, reason = await fetcher.fetch(browser, f"https://{domain}")
+    html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+    if html is None:
+        pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
+        html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
+
     if html is None:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
         return {"type": "error", "reason": reason}
@@ -151,10 +156,10 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         return {"type": "error", "reason": "Parked"}
     
     body_results = [home_text]
-    links = extract_links(html, f"https://{domain}")
+    links = extract_links(html, final_url)
     
     target_urls = []
-    scraped_urls = {f"https://{domain}"}
+    scraped_urls = {final_url}
     for group in paths:
         for p in group:
             m = next((l for l in links if p in l and l not in scraped_urls), None)
@@ -173,8 +178,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
-        sys_p1 = parts_p1[1].strip()
-        user_p1 = parts_p1[0].strip() + "\n\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
+        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
         res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
@@ -200,10 +205,10 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
         return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
-    parts_p2 = prompts[1].split("Your task:")
+    parts_p2 = prompts[1].split("XX")
     if len(parts_p2) == 2:
-        sys_p2 = "Your task:\n" + parts_p2[1].strip()
-        user_p2 = parts_p2[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd).strip()
+        sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
+        user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
         cache_id = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
         res_p2_obj = await call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id)
     else:
@@ -227,7 +232,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     bm_paths_str_1 = "\n".join([f"{r[0]}. {r[1]} - {r[2]}" for r in bm_mapping.get(feed, {}).get("1stLevel", [])])
     parts_bm1 = prompts[6].split("Company Description:\nYY")
     if len(parts_bm1) == 2:
-        sys_bm1 = (parts_bm1[0].strip() + "\n\n" + parts_bm1[1].strip()).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
+        sys_bm1 = (parts_bm1[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm1[1].strip()).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
         user_bm1 = "Company Description:\n" + ld_main
         cache_key = f"prompt_6_{f_id}"
         cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm1)
@@ -245,18 +250,34 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     tokens["in"] += in3; tokens["out"] += out3; tokens["think"] += think3
     
     bm_name_1 = "No Results"
-    m = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm1, re.M)
-    if m: bm_name_1 = m.group(1).strip()
+    if res_bm1.strip().startswith(("No Results", "No results")):
+        bm_name_1 = "No Results"
+    else:
+        pattern = r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation'
+        m = re.search(pattern, res_bm1, re.MULTILINE)
+        if m:
+            bm_name_1 = m.group(1).strip()
+        else:
+            bm_name_1 = "No Results"
     
     bm_name_final, bm_id_final = "No BM matched", "No ID"
+    bm_p2, res_bm2 = "", ""
+    
+    # Pre-fallback to 1st level if it's Live. BM2 will overwrite this if successful.
+    if bm_name_1 != "No Results" and bm_1st_stat.get(bm_name_1) == "Live":
+        bm_name_final, bm_id_final = bm_name_1, bm_ids.get(bm_name_1, "No ID")
+        
     f_bms2 = bm_mapping.get(feed, {}).get("2ndLevel", [])
+    if f_bms2:
+        bm_p2 = prompts[7].replace("XX", ld_main)
+
     if bm_name_1 != "No Results" and f_bms2:
-        filt = [s for s in f_bms2 if s[2].startswith(bm_name_1)]
+        filt = [s for s in f_bms2 if s[2].lower().startswith(bm_name_1.lower())]
         if filt:
             bm_paths_str_2 = "\n".join([" ".join(map(str, r)) for r in filt])
             parts_bm2 = prompts[7].split("Company Description:\nXX")
             if len(parts_bm2) == 2:
-                sys_bm2 = (parts_bm2[0].strip() + "\n\n" + parts_bm2[1].strip()).replace("BM_Paths", bm_paths_str_2)
+                sys_bm2 = (parts_bm2[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm2[1].strip()).replace("BM_Paths", bm_paths_str_2)
                 user_bm2 = "Company Description:\n" + ld_main
                 cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
                 cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
@@ -272,14 +293,31 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
             if res_bm2_obj.thinking_text: think_text += f"BM2:\n{res_bm2_obj.thinking_text}\n"
             tokens["in"] += in4; tokens["out"] += out4; tokens["think"] += think4
-            m2 = re.search(r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation', res_bm2, re.M)
-            if m2: bm_name_final = m2.group(1).strip(); bm_id_final = bm_ids.get(bm_name_final, "No ID")
-            elif bm_1st_stat.get(bm_name_1) == "Live": bm_name_final, bm_id_final = bm_name_1, bm_ids.get(bm_name_1, "No ID")
+            if res_bm2.strip().startswith(("No Results", "No results")):
+                if bm_1st_stat.get(bm_name_1) == "Live":
+                    bm_name_final = bm_name_1
+                    bm_id_final = bm_ids.get(bm_name_1, "No ID")
+                else:
+                    bm_name_final = "No BM matched"
+                    bm_id_final = "No ID"
+            else:
+                pattern = r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation'
+                m2 = re.search(pattern, res_bm2, re.MULTILINE)
+                if m2:
+                    bm_name_final = m2.group(1).strip()
+                    bm_id_final = bm_ids.get(bm_name_final, "No ID")
+                else:
+                    if bm_1st_stat.get(bm_name_1) == "Live":
+                        bm_name_final = bm_name_1
+                        bm_id_final = bm_ids.get(bm_name_1, "No ID")
+                    else:
+                        bm_name_final = "No BM matched"
+                        bm_id_final = "No ID"
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain} | BM: {bm_name_final}")
     return {
         "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
-        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1_raw[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000] if 'bm_p2' in locals() else "", "bmr2": res_bm2[:40000] if 'res_bm2' in locals() else "", "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": "bu_llm_sd_ld, bu_Internal_SRprocess_TypeA", "feed_id": f_id,
+        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": "bu_llm_sd_ld, bu_Internal_SRprocess_TypeA", "feed_id": f_id,
         "tokens": tokens, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
         "body_len": len(combined)
@@ -358,13 +396,13 @@ class TypeAPipeline:
         bm_mapping, bm_ids, bm_1st_stat = {}, {}, {}
         for r in f_lvl[1:]:
             if len(r) < 5: continue
-            f, p, bid, stat, desc = r[0], r[1], r[2], r[3], r[4]
+            f, p, bid, stat, desc = r[0].strip(), r[1].strip(), r[2].strip(), r[3].strip(), r[4].strip()
             bm_ids[p], bm_1st_stat[p] = bid, stat
             if f not in bm_mapping: bm_mapping[f] = {"1stLevel":[], "2ndLevel":[]}
             bm_mapping[f]["1stLevel"].append([len(bm_mapping[f]["1stLevel"])+1, p, desc])
         for r in s_lvl[1:]:
             if len(r) < 4: continue
-            f, p, bid, desc = r[0], r[1], r[2], r[3]
+            f, p, bid, desc = r[0].strip(), r[1].strip(), r[2].strip(), r[3].strip()
             bm_ids[p] = bid
             if f not in bm_mapping: bm_mapping[f] = {"1stLevel":[], "2ndLevel":[]}
             bm_mapping[f]["2ndLevel"].append([len(bm_mapping[f]["2ndLevel"])+1, ".", p, " -"+desc])
@@ -478,8 +516,11 @@ class TypeAPipeline:
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         
                         f_id = res["feed_id"]
-                        s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
-                        bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                        if res["bm_id"] != "No ID":
+                            s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
+                            bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                        else:
+                            bm_up = "NotUpdated"
                         
                         f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
                         As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)

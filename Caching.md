@@ -1,257 +1,198 @@
 # Native Gemini Context Caching Architecture
 
-To achieve high throughput, sub-second latency, and maximum token efficiency, the publishing pipeline integrates **native Gemini Context Caching** via the standard Google AI `v1beta` cached contents API.
+To achieve high throughput, sub-second latency, and save money, the publishing pipeline uses **Gemini Context Caching**.
 
-This document details how caching is designed, implemented, and executed across all three engines (Type A, B, and C), with complete code samples, JSON payload examples, and real-world usage patterns.
+This document explains exactly how caching works in our code, using simple words and real examples from our codebase.
 
 ---
 
-## 1. Architectural Overview
+## 1. What is Context Caching? (The Simple Explanation)
 
-Large system prompts (such as those containing BM definitions, multi-stage heuristics, and scraping instructions) contain significant boilerplate text. Instead of sending these system instructions repeatedly with every single domain evaluation, they are registered once as a **Cached Content Context** on the Gemini server.
+Imagine you are asking an AI to analyze 1,000 different company websites. 
+For every single website, you have to tell the AI the **rules**: "Act as an elite engineer, look for business models, format the output as JSON, here are the definitions of our feeds..."
 
-Subsequent API calls simply pass a lightweight pointer (`cachedContent`) referencing the pre-warmed context.
+Sending these huge rules 1,000 times takes up millions of tokens, costs a lot of money, and slows down the API.
 
-### Context Caching Dataflow
-```mermaid
-sequenceDiagram
-    participant Engine as Engine Worker
-    participant Manager as GeminiCacheManager
-    participant API as Gemini API Gateway
+**Context Caching** solves this by splitting the prompt into two parts:
+1. **System Instruction (The Rules):** We send the giant rules to Google *once*. Google saves it and gives us a short receipt (a Cache ID like `cachedContents/ch_123`).
+2. **User Content (The Data):** When we evaluate a specific company, we just send the company's website text along with the Cache ID. 
 
-    Engine->>Manager: get_or_create(key="prompt_0", sys_prompt)
-    alt Cache Not in Manager Memory
-        Manager->>API: POST /v1beta/cachedContents (Create Cache)
-        API-->>Manager: Return Cache Identifier (cachedContents/ch_...)
-        Manager->>Manager: Store in memory cache map
-    end
-    Manager-->>Engine: Return Cache ID
+Google instantly combines our short data with the pre-saved rules. It's up to 3x faster and 75% cheaper.
 
-    Engine->>API: POST /v1beta/models/gemini-...:generateContent
-    Note over Engine, API: Payload includes "cachedContent": "cachedContents/ch_..."
-    API-->>Engine: Returns Content Generation Result (Fast & Cheap)
+---
+
+## 2. How We Break Down Prompts in Our Code
+
+To use caching, we must separate our giant Google Sheet prompts into the "Static Rules" and the "Dynamic Data". We do this using delimiters.
+
+### Example: Strategy 1 - The "XX" Delimiter (Used in Stage 1 Scraping)
+
+In our Google Sheets, our Stage 1 prompt looks exactly like this structurally:
+```text
+Act as an expert business analyst evaluating a company's website.
+HTML Content:
+XX
+Your task is to thoroughly analyze the HTML content provided above and extract the company's core business model.
+You must return a JSON object with exactly two keys:
+1. "short_description": A 1-2 sentence summary of what the company does.
+2. "long_description": A detailed paragraph explaining their products, services, and target market.
+If the website is parked or lacks sufficient information, return "NO_DATA".
+```
+
+Here is exactly how our code (e.g., `TypeC/main.py`) breaks this down:
+
+```python
+# 1. We split the prompt exactly where "XX" is.
+parts_p1 = prompts[0].split("XX")
+
+if len(parts_p1) == 2:
+    # 2. We combine everything before and after "XX" into the System Instruction
+    # We add a bridge phrase so the AI knows the data will arrive in the User Content.
+    sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+    
+    # 3. The User Content is strictly the dynamic data (the URL and the Scraped Website Text)
+    user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body[:20000]
 ```
 
 ---
 
-## 2. API Payload Examples
+## 3. The Full Flow (Code & API Payloads)
 
-Here are the concrete JSON request and response payloads exchanged between the application and the Gemini API.
+Now that we have separated `sys_p1` and `user_p1`, here is the step-by-step flow of what happens under the hood.
 
-### A. Creating a Cached Content Reference
-**Endpoint**: `POST https://generativelanguage.googleapis.com/v1beta/cachedContents?key=<API_KEY>`
+### Step 1: Cache the System Instruction
+Our code calls `cache_manager.get_or_create(session, "prompt_0", sys_p1)`. 
 
-#### Request Payload
+**What the Code does under the hood (API Request):**
+It sends the huge `sys_p1` text (the rules) to Gemini to store it.
 ```json
+// POST /v1beta/cachedContents
 {
   "model": "models/gemini-3.1-flash-lite",
   "systemInstruction": {
-    "parts": [
-      {
-        "text": "Act as an elite full-stack engineer and analyze the given webpage HTML. Output a strict JSON structure containing the extracted title, descriptions, and framework indicators."
-      }
-    ]
+    "parts": [{"text": "Your task is to thoroughly analyze the HTML content provided above and extract the company's core business model. You must return a JSON object with exactly two keys: 1. 'short_description'... (etc)"}]
   },
   "ttl": "3600s"
 }
 ```
 
-#### Response Payload (Status: `200 OK`)
+**Gemini's Response:**
+Gemini saves it and returns a unique name (the Cache ID).
 ```json
 {
   "name": "cachedContents/ch_7a8d9f0e1c2b3d4e",
   "model": "models/gemini-3.1-flash-lite",
-  "createTime": "2026-05-18T12:00:00Z",
   "expireTime": "2026-05-18T13:00:00Z"
 }
 ```
+Our `GeminiCacheManager` saves `"cachedContents/ch_7a8d9f0e1c2b3d4e"` in memory so we never have to upload those rules again for the next hour.
 
----
+### Step 2: Send the User Content with the Cache ID
+Our code then calls `call_gemini_api` and passes `user_p1` along with the `cached_content_name`.
 
-### B. Executing a Cached Generation Call
-**Endpoint**: `POST https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-lite:generateContent?key=<API_KEY>`
-
-#### Request Payload (Omitted `systemInstruction`, Added `cachedContent`)
+**What the Code does under the hood (API Request):**
+Instead of sending the rules again, we just send the prefix, the HTML, and the Cache ID!
 ```json
+// POST /v1beta/models/gemini-3.1-flash-lite:generateContent
 {
   "contents": [
     {
-      "parts": [
-        {
-          "text": "HTML CONTENT: <html><body><h1>Tracxn Technology</h1><p>We are a global SaaS data intelligence provider.</p></body></html>"
-        }
-      ]
+      "parts": [{"text": "Act as an expert business analyst evaluating a company's website.\nHTML Content:\n\n<html><body><h1>Tracxn</h1>...</body></html>"}]
     }
   ],
   "cachedContent": "cachedContents/ch_7a8d9f0e1c2b3d4e"
 }
 ```
 
-#### Response Payload (Status: `200 OK`)
+**Gemini's Response:**
+Gemini generates the result lightning fast.
 ```json
 {
   "candidates": [
     {
       "content": {
-        "parts": [
-          {
-            "text": "{\n  \"Short Description\": \"Global SaaS data intelligence provider.\",\n  \"Long Description\": \"Tracxn is a SaaS data provider tracking startups, private companies, and emerging technology sectors globally.\"\n}"
-          }
-        ]
-      },
-      "finishReason": "STOP"
+        "parts": [{"text": "Short Description: Global SaaS data provider..."}]
+      }
     }
   ],
   "usageMetadata": {
     "promptTokenCount": 850,
-    "candidatesTokenCount": 42,
-    "totalTokenCount": 892
+    "candidatesTokenCount": 42
   }
 }
 ```
 
 ---
 
-## 3. Core Implementation
+## 4. Other Prompt Breakdown Strategies We Use
 
-Below is the complete implementation of `GeminiCacheManager` and `call_gemini_api` located in [utils.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing/sr_common/utils.py):
+Depending on how the prompt in the Google Sheet is written, we split it differently in the Python code.
+
+### Strategy 2: Dynamic Split with Static Replacements (Used in BM Prediction)
+Business Model (BM) prompts are highly complex. They contain a massive list of business models (Paths) and Feed Definitions that change per feed, but are static for any given company in that feed.
+
+**How it's split in `TypeB/main.py`:**
+```python
+# We split exactly at "XX" (which is where the Company Description belongs)
+parts_bm = prompts[3].split("XX")
+
+if len(parts_bm) == 2:
+    # System Instruction: We inject the HUGE list of BM Paths and Feed Definitions into the template, leaving NO dynamic data.
+    sys_bm = (parts_bm[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm[1].strip()).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
+    
+    # User Content: We just pass the company's long description to evaluate against the rules.
+    user_bm = "Company Description:\n" + ld
+    
+    # CRITICAL: Because the BM Paths are different for every Feed, we cache it uniquely per feed!
+    cache_key = f"prompt_3_{feed.replace(' ', '_')}"
+    cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm)
+```
+
+---
+
+## 5. Pipeline Integration (The Code View)
+
+Here is how all of this comes together in a single function inside our processing engines (like `TypeC/main.py`):
 
 ```python
-class GeminiCacheManager:
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.url = f"{settings.GEMINI_CACHE_URL}?key={api_key}"
-        self.caches = {}
-        self.lock = asyncio.Lock()
+async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
+    domain = row[h_map["domain"]]
+    
+    # 1. Fetch domain and extract text
+    html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+    body = clean_html(html)
 
-    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
-        # 1. Thread-safe read check (if cache exists in memory map, return immediately)
-        if key in self.caches:
-            return self.caches[key]
+    # 2. Split the prompt into System Instruction and User Content
+    parts_p1 = prompts[0].split("XX")
+    if len(parts_p1) == 2:
+        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body[:20000]
         
-        async with self.lock:
-            # Double-check lock pattern to prevent concurrent creation requests by multiple workers
-            if key in self.caches:
-                return self.caches[key]
-                
-            # 2. Extract model string dynamically from base url configuration
-            model_name = settings.GEMINI_API_URL.split("/v1beta/")[1].split(":")[0]
-            payload = {
-                "model": model_name,
-                "systemInstruction": {"parts": [{"text": system_instruction}]},
-                "ttl": ttl
-            }
-            
-            # 3. Create context cache on Gemini servers
-            async with session.post(self.url, json=payload, timeout=30) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    cache_name = data["name"] # e.g. "cachedContents/ch_..."
-                    self.caches[key] = cache_name
-                    logging.info(f"CACHE CREATED: {key} -> {cache_name}")
-                    return cache_name
-                else:
-                    text = await response.text()
-                    # 4. Graceful Fallback if under the token limit (typical of tiny prompts)
-                    logging.warning(f"CACHE CREATE SKIPPED for {key} (likely under token limit): {response.status} {text}")
-                    self.caches[key] = None
-                    return None
-
-async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None) -> LLMResult:
-    import random
-    if not prompt or prompt == "noData":
-        return LLMResult(text="Error", success=False)
+        # 3. Get or create the cached reference key
+        # If already cached, it skips the network call. If not, it registers it on the server.
+        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        
+        # 4. Call Gemini using the cached pointer
+        res_obj = await call_gemini_api(
+            session, 
+            user_p1, 
+            gemini_limiter, 
+            system_instruction=sys_p1, 
+            cached_content_name=cache_id
+        )
+    else:
+        # Fallback to inline call if delimiter is missing
+        p1 = prompts[0].replace("XX", body[:20000])
+        res_obj = await call_gemini_api(session, p1, gemini_limiter)
     
-    url = f"{settings.GEMINI_API_URL}?key={settings.TYPEA_GEMINI_API_KEY}"
-    max_retries = 3
-    
-    # Standard prompt payload
-    payload = {"contents": [{"parts": [{"text": prompt}]}]}
-    
-    # Dynamic routing for cached vs. inline contexts
-    if cached_content_name:
-        payload["cachedContent"] = cached_content_name
-    elif system_instruction:
-        payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
-    
-    for attempt in range(max_retries):
-        await limiter.throttle()
-        try:
-            timeout = aiohttp.ClientTimeout(total=60)
-            async with session.post(url, json=payload, timeout=timeout) as response:
-                res = await response.json()
-                
-                # Handle rate limiting with exponential backoff + jitter
-                if response.status == 429:
-                    base_delay = 2 ** (attempt + 1)
-                    jitter = random.uniform(0, base_delay)
-                    wait_time = base_delay + jitter
-                    logging.warning(f"GEMINI 429: Rate limited. Backing off {wait_time:.1f}s")
-                    await asyncio.sleep(wait_time)
-                    continue
-                
-                if response.status != 200:
-                    logging.error(f"GEMINI ERR {response.status}: {res}")
-                    return LLMResult(text="Error", success=False)
-                
-                parts = res.get('candidates', [{}])[0].get('content', {}).get('parts', [])
-                text_parts = []
-                for p in parts:
-                    text_parts.append(p.get("text", ""))
-                
-                text = "".join(text_parts)
-                usage = res.get("usageMetadata", {})
-                return LLMResult(
-                    text=text,
-                    prompt_tokens=usage.get("promptTokenCount", 0),
-                    candidate_tokens=usage.get("candidatesTokenCount", 0),
-                    success=True
-                )
-        except Exception as e:
-            logging.error(f"GEMINI EXC: {str(e)}")
-            if attempt < max_retries - 1:
-                await asyncio.sleep(2 ** (attempt + 1))
-                continue
-            return LLMResult(text="Error", success=False)
-    
-    return LLMResult(text="Error", success=False)
+    return res_obj
 ```
 
 ---
 
-## 4. Pipeline Integration (Usage Pattern)
+## 6. Performance & Financial Advantages
 
-Here is a practical integration pattern illustrating how the processing engines (like `TypeB` in [main.py](file:///Users/vishnu/Documents/Tracxn/SR/Publishing/TypeB/main.py)) orchestrate their asynchronous tasks using this caching layer.
-
-```python
-async def process_domain_stage1(browser, session, row, prompts, cache_manager) -> Dict:
-    # 1. Fetch the raw system prompt configuration
-    sys_p1 = prompts.get("Stage1_Prompt", "")
-    user_p1 = f"HTML: {row['cleaned_html']}"
-
-    # 2. Get or create the cached reference key
-    # If already cached, it takes <1ms locally. If not, it registers it on the server.
-    cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-
-    # 3. Call Gemini using the cached pointer
-    res_p1_obj = await call_gemini_api(
-        session, 
-        user_p1, 
-        gemini_limiter, 
-        system_instruction=sys_p1, 
-        cached_content_name=cache_id
-    )
-
-    if res_p1_obj.success:
-        return extract_descriptions(res_p1_obj.text)
-    return {"status": "failed"}
-```
-
----
-
-## 5. Performance & Financial Advantages
-
-By leveraging native context caching, the SR Publishing Engine gains significant operational benefits:
+By taking the time to split prompts and cache the system instructions, the SR Publishing Engine gains massive operational benefits:
 
 | Metric | Traditional Inline Calls | Native Context Cached Calls | Impact |
 | :--- | :--- | :--- | :--- |

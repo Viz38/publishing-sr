@@ -23,7 +23,7 @@ class StealthFetcher:
         }
         self.timeout = timeout
 
-    async def fetch(self, browser, url: str) -> Tuple[Optional[str], int, str]:
+    async def fetch(self, browser, url: str) -> Tuple[Optional[str], str, str]:
         """Orchestrates multi-tier fetching with advanced stealth."""
         logger.info(f"FETCH START: {url}")
 
@@ -35,8 +35,8 @@ class StealthFetcher:
                 if resp.status_code == 200:
                     content = resp.text
                     if self._is_valid(content):
-                        logger.info(f"TIER 0 SUCCESS: {url}")
-                        return content, 200, "Success"
+                        logger.info(f"TIER 0 SUCCESS: {url} -> {resp.url}")
+                        return content, str(resp.url), "Success"
                     logger.warning(f"TIER 0 FAIL: {url} | Captcha/Low Content")
                 else:
                     logger.warning(f"TIER 0 FAIL: {url} | Status: {resp.status_code}")
@@ -51,8 +51,8 @@ class StealthFetcher:
             if s_resp.status == 200:
                 content = s_resp.text
                 if self._is_valid(content):
-                    logger.info(f"TIER 1 SUCCESS: {url}")
-                    return content, 200, "Success"
+                    logger.info(f"TIER 1 SUCCESS: {url} -> {s_resp.url}")
+                    return content, str(s_resp.url), "Success"
         except Exception as e:
             logger.warning(f"TIER 1 ERR: {url} | {e}")
 
@@ -83,8 +83,8 @@ class StealthFetcher:
                             await asyncio.sleep(get_human_delay(2.0, 1.0))
                             content = await page.content()
                             if self._is_valid(content, min_len=500):
-                                logger.info(f"TIER 2 SUCCESS: {url}")
-                                return content, 200, "Success"
+                                logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")
+                                return content, str(page.url), "Success"
                         break
                 except Exception as e:
                     logger.warning(f"TIER 2 ERR: {url} | {e}")
@@ -103,12 +103,12 @@ class StealthFetcher:
                 if s_resp.status == 200:
                     content = s_resp.text
                     if self._is_valid(content, min_len=300):
-                        logger.info(f"TIER 3 SUCCESS: {url}")
-                        return content, 200, "Success"
+                        logger.info(f"TIER 3 SUCCESS: {url} -> {s_resp.url}")
+                        return content, str(s_resp.url), "Success"
         except Exception as e:
             logger.warning(f"TIER 3 ERR: {url} | {e}")
 
-        return None, 0, "Unable To Scrap"
+        return None, url, "Unable To Scrap"
 
     def _is_valid(self, content: str, min_len: int = 500) -> bool:
         if not content: return False

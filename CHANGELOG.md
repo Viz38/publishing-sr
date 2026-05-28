@@ -1,3 +1,14 @@
+## [2026-05-28] Fix BM Prompt 2 Skipping Issue (Type A)
+Files changed:
+- TypeA/main.py
+Reason:
+Fixed an issue in Type A where BM Prompt 2 was silently skipped for all domains. The Gemini API output for BM Prompt 1 often included Markdown asterisks (e.g., `**1. E-Commerce** - Explanation:`), which caused the regex matching for `bm_name_1` to fail or incorrectly include `**`. Additionally, exact case-sensitive matching prevented some 2nd level BM lookups.
+Changes:
+1. **Markdown Stripping**: Stripped `*` and `#` characters from LLM responses before regex processing to handle Markdown formatting correctly.
+2. **Regex Lenience**: Updated the regex to be case-insensitive, support leading whitespace, and handle optional delimiters around "Explanation".
+3. **Case-Insensitive Matching**: Changed `s[2].startswith(bm_name_1)` to be completely case-insensitive.
+4. **Whitespace Cleaning**: Added `.strip()` to `f_lvl` and `s_lvl` data when populating `bm_mapping` to prevent trailing space lookup failures.
+
 ## [2026-05-27] Fix Token Tracking for Gemini Flash Lite
 Files changed:
 - sr_common/utils.py
