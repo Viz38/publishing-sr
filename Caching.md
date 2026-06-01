@@ -13,7 +13,7 @@ For every single website, you have to tell the AI the **rules**: "Act as an elit
 
 Sending these huge rules 1,000 times takes up millions of tokens, costs a lot of money, and slows down the API.
 
-**Context Caching** solves this by splitting the prompt into two parts:
+**Context Cacht5 ing** solves this by splitting the prompt into two parts:
 1. **System Instruction (The Rules):** We send the giant rules to Google *once*. Google saves it and gives us a short receipt (a Cache ID like `cachedContents/ch_123`).
 2. **User Content (The Data):** When we evaluate a specific company, we just send the company's website text along with the Cache ID. 
 
