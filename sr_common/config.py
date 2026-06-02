@@ -58,12 +58,4 @@ class Settings(BaseSettings):
     # Service Auth
     SERVICE_AUTH_TOKEN: str = ""
 
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-        # Manually sync from environ if Pydantic missed them
-        for field in self.model_fields:
-            env_val = os.getenv(field)
-            if env_val and not getattr(self, field):
-                setattr(self, field, env_val)
-
 settings = Settings()

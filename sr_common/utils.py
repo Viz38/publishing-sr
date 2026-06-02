@@ -6,6 +6,7 @@ import re
 import os
 import random
 import math
+import time
 from typing import Optional, Dict, Tuple, Any
 from .config import settings
 from .models import LLMResult
@@ -129,19 +130,49 @@ def is_parked_domain(html: str, text: str) -> Tuple[bool, str]:
     return False, ""
 
 class GeminiCacheManager:
-    def __init__(self, api_key: str):
+    def __init__(self, api_key: str, max_size: int = 50):
         self.api_key = api_key
         self.url = f"{settings.GEMINI_CACHE_URL}?key={api_key}"
-        self.caches = {}
+        # cache_name -> (key, expiry)
+        self.caches: Dict[str, Tuple[str, float]] = {}
         self.lock = asyncio.Lock()
+        self.max_size = max_size
+
+    async def _evict_oldest(self, session: aiohttp.ClientSession):
+        if not self.caches:
+            return
+            
+        # Find the oldest based on expiry
+        oldest_key = min(self.caches.keys(), key=lambda k: self.caches[k][1])
+        cache_name, _ = self.caches[oldest_key]
+        del self.caches[oldest_key]
+        
+        # Delete from Gemini API
+        if cache_name:
+            delete_url = f"https://generativelanguage.googleapis.com/v1beta/{cache_name}?key={self.api_key}"
+            try:
+                async with session.delete(delete_url, timeout=10) as response:
+                    if response.status != 200:
+                        logging.warning(f"Failed to explicitly delete cache {cache_name}: {response.status}")
+            except Exception as e:
+                logging.warning(f"Exception while deleting cache {cache_name}: {e}")
 
     async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        current_time = time.time()
+        
+        # Fast path check
         if key in self.caches:
-            return self.caches[key]
+            cache_name, expiry = self.caches[key]
+            if cache_name and current_time < (expiry - 300): # 5 mins buffer
+                return cache_name
         
         async with self.lock:
+            # Recheck inside lock
             if key in self.caches:
-                return self.caches[key]
+                cache_name, expiry = self.caches[key]
+                if cache_name and current_time < (expiry - 300):
+                    return cache_name
+                # If it's expired, we just overwrite it below
                 
             model_name = settings.GEMINI_API_URL.split("/v1beta/")[1].split(":")[0]
             payload = {
@@ -150,17 +181,24 @@ class GeminiCacheManager:
                 "ttl": ttl
             }
             
+            # LRU Eviction if at max capacity
+            if len(self.caches) >= self.max_size and key not in self.caches:
+                await self._evict_oldest(session)
+            
+            ttl_seconds = int(ttl.replace("s", ""))
+            
             async with session.post(self.url, json=payload, timeout=30) as response:
                 if response.status == 200:
                     data = await response.json()
                     cache_name = data["name"]
-                    self.caches[key] = cache_name
-                    logging.info(f"CACHE CREATED: {key} -> {cache_name}")
+                    self.caches[key] = (cache_name, current_time + ttl_seconds)
+                    logging.info(f"CACHE CREATED: {key} -> {cache_name} (Active: {len(self.caches)}/{self.max_size})")
                     return cache_name
                 else:
                     text = await response.text()
-                    logging.warning(f"CACHE CREATE SKIPPED for {key} (likely under token limit): {response.status} {text}")
-                    self.caches[key] = None
+                    logging.warning(f"CACHE CREATE SKIPPED for {key}: {response.status} {text}")
+                    # Don't cache failures permanently, but could store a negative cache if needed.
+                    # We'll just return None to let caller fall back.
                     return None
 
 async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None) -> LLMResult:
@@ -194,7 +232,21 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
                     continue
                 
                 if response.status != 200:
-                    logging.error(f"GEMINI ERR {response.status}: {res}")
+                    logging.error(f"GEMINI ERR {response.status}: {res} | Attempt {attempt + 1}/{max_retries}")
+                    
+                    # Fallback for expired cache error from Gemini
+                    if response.status in (400, 404) and "cachedContent" in str(res):
+                        logging.warning("Cache missing/expired detected during generation. Retrying without cache.")
+                        if "cachedContent" in payload:
+                            del payload["cachedContent"]
+                        if system_instruction:
+                            payload["systemInstruction"] = {"parts": [{"text": system_instruction}]}
+                        await asyncio.sleep(1)
+                        continue
+                        
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(2 ** (attempt + 1))
+                        continue
                     return LLMResult(text="Error", success=False)
                 
                 parts = res.get('candidates', [{}])[0].get('content', {}).get('parts', [])

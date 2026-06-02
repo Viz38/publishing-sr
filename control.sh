@@ -722,7 +722,7 @@ while true; do
             
             [ ! -f "$BASE_DIR/.venv/bin/python" ] && uv venv "$BASE_DIR/.venv" --python "$PYTHON_CMD" --clear > /dev/null 2>&1
             echo -e "   ▶ Installing dependencies via uv..."
-            uv pip install -r "TypeA/requirements.txt" --python "$BASE_DIR/.venv/bin/python" >> "$SETUP_LOG" 2>&1
+            uv sync --python "$BASE_DIR/.venv/bin/python" >> "$SETUP_LOG" 2>&1
 
             for f in "${FOLDERS[@]}"; do
                 mkdir -p "$f/Logs"

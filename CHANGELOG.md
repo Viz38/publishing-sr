@@ -1,3 +1,20 @@
+## [2026-06-02] Architectural Refactoring: Unified Dependencies and Memory Optimization
+Files changed:
+- pyproject.toml (New)
+- control.sh
+- TypeA/api.py, TypeB/api.py, TypeC/api.py
+- sr_common/config.py
+- TypeA/requirements.txt, TypeB/requirements.txt, TypeC/requirements.txt (Deleted)
+Reason:
+Implement a modern, unified architectural structure based on `uv` for robust dependency management, and resolve memory leaks in the API middleware.
+Changes:
+1. **Unified Dependencies**: Replaced individual `requirements.txt` files with a single, global `pyproject.toml` file at the root.
+2. **`uv sync` Integration**: Updated `control.sh` to use `uv sync` for creating virtual environments and installing dependencies, significantly speeding up bootstrapping.
+3. **Memory Leak Fix**: Refactored the `log_requests` HTTP middleware in TypeA, TypeB, and TypeC APIs. It no longer unconditionally buffers the entire request payload into memory, preventing Out-Of-Memory (OOM) errors during heavy traffic.
+4. **Concurrency Safety**: Introduced `asyncio.Lock()` to synchronize state mutations in the FastAPI engines, resolving race conditions.
+5. **Config Cleanup**: Refactored `sr_common/config.py` to correctly utilize Pydantic V2 `BaseSettings` out of the box, removing redundant `os.environ` sync hacks.
+6. **LLM Resilience**: Fixed the `call_gemini_api` logic in `sr_common/utils.py` to properly execute the 3-attempt exponential backoff retry loop for transient non-200/non-429 API errors (e.g., 500/503), instead of immediately aborting.
+
 ## [2026-05-28] Fix BM Prompt 2 Skipping Issue (Type A)
 Files changed:
 - TypeA/main.py

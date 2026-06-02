@@ -36,17 +36,10 @@ app = FastAPI(title="SR Publishing Type B API")
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
-    # Capture Request Body safely
-    body = await request.body()
-    # Reset receive to allow app to read body again
-    async def receive():
-        return {"type": "http.request", "body": body}
-    
     client_ip = request.headers.get("x-forwarded-for") or request.client.host
-    logger.info(f"REQ FROM {client_ip}: {request.method} {request.url.path} | Body: {body.decode()[:500]}")
+    logger.info(f"REQ FROM {client_ip}: {request.method} {request.url.path}")
     
-    # We pass the modified request (with reset receive)
-    response = await call_next(Request(request.scope, receive=receive))
+    response = await call_next(request)
     return response
 
 app.add_middleware(
@@ -66,6 +59,7 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+state_lock = asyncio.Lock()
 state = {
     "status": "idle",
     "current_task": None,
@@ -78,9 +72,10 @@ def utc_now():
     return datetime.now(timezone.utc).isoformat()
 
 async def run_pipeline_task(request: RunRequest):
-    state["status"] = "running"
-    state["start_time"] = utc_now()
-    state["progress"] = {"current": 0, "total": 0, "success": 0, "fail": 0}
+    async with state_lock:
+        state["status"] = "running"
+        state["start_time"] = utc_now()
+        state["progress"] = {"current": 0, "total": 0, "success": 0, "fail": 0}
     
     try:
         if os.path.exists(".progress.json"):

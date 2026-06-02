@@ -1,0 +1,41 @@
+[project]
+name = "sr-publishing"
+version = "0.1.0"
+description = "SR Publishing Engine"
+requires-python = ">=3.10"
+dependencies = [
+    "aiohttp",
+    "beautifulsoup4",
+    "camoufox",
+    "certifi",
+    "click",
+    "curl_cffi",
+    "fastapi",
+    "google-auth",
+    "google-auth-httplib2",
+    "google-auth-oauthlib",
+    "gspread",
+    "gspread-asyncio",
+    "gspread-formatting",
+    "h11",
+    "lxml",
+    "oauth2client",
+    "openpyxl",
+    "patchright",
+    "psutil",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "requests",
+    "scrapling>=0.4.8",
+    "typing-extensions",
+    "uvicorn[standard]",
+    "uvloop",
+    "msgspec",
+    "httpx",
+    "google-generativeai"
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
