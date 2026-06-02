@@ -14,6 +14,7 @@ Changes:
 4. **Concurrency Safety**: Introduced `asyncio.Lock()` to synchronize state mutations in the FastAPI engines, resolving race conditions.
 5. **Config Cleanup**: Refactored `sr_common/config.py` to correctly utilize Pydantic V2 `BaseSettings` out of the box, removing redundant `os.environ` sync hacks.
 6. **LLM Resilience**: Fixed the `call_gemini_api` logic in `sr_common/utils.py` to properly execute the 3-attempt exponential backoff retry loop for transient non-200/non-429 API errors (e.g., 500/503), instead of immediately aborting.
+7. **UV Build Fix**: Explicitly disabled package building in `pyproject.toml` (`[tool.uv] package = false`) and removed the `hatchling` build system. This resolves the `packages = ["src/foo"]` error during OS-Native Service installation, as the publishing engine is a collection of scripts, not a distributable wheel package.
 
 ## [2026-05-28] Fix BM Prompt 2 Skipping Issue (Type A)
 Files changed:
