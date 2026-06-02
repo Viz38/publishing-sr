@@ -1,3 +1,13 @@
+## [2026-06-02] Fix: Prevent Cloudflare Tunnel Drop in Ubuntu
+Files changed:
+- control.sh
+Reason:
+Fix an issue where the Cloudflare tunnel (`cloudflared`) was constantly disconnecting on Ubuntu servers (e.g., 599) due to aggressive uninstall/install cycles during engine restarts.
+Changes:
+1. **Persistent Service Config**: Changed `stop_all` to cleanly `systemctl disable --now cloudflared` instead of `sudo cloudflared service uninstall`. This preserves the systemd service file and token configuration.
+2. **Stable Start**: `start_standard` and `start_service_mode` now check if the service file exists instead of checking if it is merely active, preventing redundant and failing install attempts.
+3. **Deep Clean Updates**: Added the `cloudflared service uninstall` command specifically to the Deep Clean (Option 10) menu for proper teardown when intended.
+
 ## [2026-06-02] LLM Resilience: Robust Token Fallback and Exception Handling
 Files changed:
 - sr_common/utils.py

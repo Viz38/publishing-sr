@@ -287,11 +287,11 @@ stop_all() {
     
     # Unified Cloudflare Cleanup
     if [[ "$OS" == "Linux" ]]; then
-        sudo cloudflared service uninstall 2>/dev/null
+        sudo systemctl disable --now cloudflared 2>/dev/null
     else
         # On macOS, we check if it was installed as a daemon first
         if [ -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
-            sudo cloudflared service uninstall 2>/dev/null
+            sudo launchctl unload -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
         fi
     fi
     
@@ -563,13 +563,15 @@ start_standard() {
         if [ ! -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
             echo -e "${YELLOW}   ▶ Installing Cloudflare Tunnel Service (requires sudo)...${NC}"
             sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
-            sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
         fi
+        sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
     else
-        if ! systemctl is-active --quiet cloudflared; then
+        if [ ! -f "/etc/systemd/system/cloudflared.service" ]; then
+            echo -e "${YELLOW}   ▶ Installing Cloudflare Tunnel Service (requires sudo)...${NC}"
             sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
-            sudo systemctl enable --now cloudflared 2>/dev/null
+            sudo systemctl daemon-reload 2>/dev/null
         fi
+        sudo systemctl enable --now cloudflared 2>/dev/null
     fi
 
     # Check for unified venv once
@@ -604,10 +606,16 @@ start_service_mode() {
     echo -e "${BLUE}🚀 Installing OS-Native Services (Production Mode)...${NC}"
     
     # Tunnel
-    sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
     if [[ "$OS" == "Darwin" ]]; then
+        if [ ! -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
+            sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
+        fi
         sudo launchctl load -w /Library/LaunchDaemons/com.cloudflare.cloudflared.plist 2>/dev/null
     else
+        if [ ! -f "/etc/systemd/system/cloudflared.service" ]; then
+            sudo cloudflared service install "$TUNNEL_TOKEN" 2>/dev/null
+            sudo systemctl daemon-reload 2>/dev/null
+        fi
         sudo systemctl enable --now cloudflared 2>/dev/null
     fi
 
@@ -776,6 +784,14 @@ while true; do
                 rm -rf "$HOME/Library/Caches/ms-playwright" 2>/dev/null
                 rm -rf "$HOME/.cache/ms-playwright" 2>/dev/null
                 rm -rf "$HOME/Library/Application Support/Camoufox" 2>/dev/null
+                echo -e "${BLUE}🧹 Uninstalling Cloudflare Tunnel...${NC}"
+                if [[ "$OS" == "Linux" ]]; then
+                    sudo cloudflared service uninstall 2>/dev/null
+                else
+                    if [ -f "/Library/LaunchDaemons/com.cloudflare.cloudflared.plist" ]; then
+                        sudo cloudflared service uninstall 2>/dev/null
+                    fi
+                fi
                 echo -e "${BLUE}🧹 Removing logs...${NC}"
                 rm -rf Type*/Logs
                 echo -e "${GREEN}✅ Deep clean complete. Use Option 1 to reinstall.${NC}"
