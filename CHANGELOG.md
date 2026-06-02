@@ -1,3 +1,13 @@
+## [2026-06-02] LLM Resilience: Robust Token Fallback and Exception Handling
+Files changed:
+- sr_common/utils.py
+Reason:
+Ensure that caching failures (e.g. min token requirements not met, or transient networking exceptions) gracefully fallback to standard non-cached requests without dropping rows.
+Changes:
+1. **Min Token Fallback**: Added explicit 400 error catch in `get_or_create` for min token requirements to gracefully skip caching and fallback to standard requests.
+2. **Exception Handling in Cache**: Wrapped the `session.post` for caching in a `try...except` block so that DNS/network errors do not propagate and crash the worker, but rather fallback to normal generation.
+3. **Generate API Token Error Retry**: Broadened the caching error fallback inside `call_gemini_api` to include "token" string matches, stripping caching and cleanly retrying without dropping the request.
+
 ## [2026-06-02] Architectural Refactoring: Unified Dependencies and Memory Optimization
 Files changed:
 - pyproject.toml (New)

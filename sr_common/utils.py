@@ -187,19 +187,26 @@ class GeminiCacheManager:
             
             ttl_seconds = int(ttl.replace("s", ""))
             
-            async with session.post(self.url, json=payload, timeout=30) as response:
-                if response.status == 200:
-                    data = await response.json()
-                    cache_name = data["name"]
-                    self.caches[key] = (cache_name, current_time + ttl_seconds)
-                    logging.info(f"CACHE CREATED: {key} -> {cache_name} (Active: {len(self.caches)}/{self.max_size})")
-                    return cache_name
-                else:
-                    text = await response.text()
-                    logging.warning(f"CACHE CREATE SKIPPED for {key}: {response.status} {text}")
-                    # Don't cache failures permanently, but could store a negative cache if needed.
-                    # We'll just return None to let caller fall back.
-                    return None
+            try:
+                async with session.post(self.url, json=payload, timeout=30) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        cache_name = data["name"]
+                        self.caches[key] = (cache_name, current_time + ttl_seconds)
+                        logging.info(f"CACHE CREATED: {key} -> {cache_name} (Active: {len(self.caches)}/{self.max_size})")
+                        return cache_name
+                    else:
+                        text = await response.text()
+                        if response.status == 400 and "token" in text.lower():
+                            logging.warning(f"CACHE SKIPPED for {key} (Min tokens not met). Falling back to non-cached request.")
+                        else:
+                            logging.warning(f"CACHE CREATE SKIPPED for {key}: {response.status} {text}. Falling back.")
+                        # Don't cache failures permanently, but could store a negative cache if needed.
+                        # We'll just return None to let caller fall back.
+                        return None
+            except Exception as e:
+                logging.warning(f"CACHE CREATE EXCEPTION for {key}: {e}. Falling back to non-cached request.")
+                return None
 
 async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None) -> LLMResult:
     import random
@@ -234,9 +241,10 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
                 if response.status != 200:
                     logging.error(f"GEMINI ERR {response.status}: {res} | Attempt {attempt + 1}/{max_retries}")
                     
-                    # Fallback for expired cache error from Gemini
-                    if response.status in (400, 404) and "cachedContent" in str(res):
-                        logging.warning("Cache missing/expired detected during generation. Retrying without cache.")
+                    # Fallback for expired cache or token errors from Gemini
+                    err_str = str(res).lower()
+                    if response.status in (400, 404) and ("cachedcontent" in err_str or "token" in err_str or "cache" in err_str):
+                        logging.warning("Cache/Token error detected during generation. Retrying without cache.")
                         if "cachedContent" in payload:
                             del payload["cachedContent"]
                         if system_instruction:
