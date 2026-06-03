@@ -137,40 +137,48 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     pipeline_logger.info(f"PROCESS START: {domain}")
     dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
     
-    html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
-    if html is None:
-        pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
-        html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
+    raw_data_col = h_map.get("raw_data")
+    raw_data = row[raw_data_col] if raw_data_col is not None and len(row) > raw_data_col else ""
+    
+    if raw_data.strip():
+        pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
+        final_url = f"https://{domain}"
+        combined = raw_data.strip()
+    else:
+        html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+        if html is None:
+            pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
+            html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
 
-    if html is None:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-        return {"type": "error", "reason": reason}
-    if len(html) < 300:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
-        return {"type": "error", "reason": "Low Content"}
-    
-    home_text = clean_html(html)
-    parked, kw = is_parked_domain(html, home_text)
-    if parked:
-        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
-        return {"type": "error", "reason": "Parked"}
-    
-    body_results = [home_text]
-    links = extract_links(html, final_url)
-    
-    target_urls = []
-    scraped_urls = {final_url}
-    for group in paths:
-        for p in group:
-            m = next((l for l in links if p in l and l not in scraped_urls), None)
-            if m: target_urls.append(m); scraped_urls.add(m); break
-    
-    if target_urls:
-        pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
-        res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
-        body_results.extend([clean_html(r[0]) for r in res if r[0]])
-    
-    combined = "\n\n".join(body_results)
+        if html is None:
+            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
+            return {"type": "error", "reason": reason}
+        if len(html) < 300:
+            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+            return {"type": "error", "reason": "Low Content"}
+        
+        home_text = clean_html(html)
+        parked, kw = is_parked_domain(html, home_text)
+        if parked:
+            pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
+            return {"type": "error", "reason": "Parked"}
+        
+        body_results = [home_text]
+        links = extract_links(html, final_url)
+        
+        target_urls = []
+        scraped_urls = {final_url}
+        for group in paths:
+            for p in group:
+                m = next((l for l in links if p in l and l not in scraped_urls), None)
+                if m: target_urls.append(m); scraped_urls.add(m); break
+        
+        if target_urls:
+            pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
+            res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
+            body_results.extend([clean_html(r[0]) for r in res if r[0]])
+        
+        combined = "\n\n".join(body_results)
     pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)}")
     
     llm_calls = 0
@@ -344,7 +352,7 @@ class TypeAPipeline:
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                all_rows = await ws.get_values(f"A{self.start_row}:Z")
+                all_rows = await ws.get_values(f"A{self.start_row}:AB")
                 data_rows = []
                 for i, r in enumerate(all_rows):
                     if len(r) < 2: continue
@@ -374,7 +382,8 @@ class TypeAPipeline:
                 h_map = {
                     "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
                     "skip": 8, "scrap_stat": 9, "sd": 10, "ld1": 11, "ld2": 12, "feed_id": 20,
-                    "r1": "J", "r2": "U", "r3": "Y" # Standard Ranges: J-U, Y-AA
+                    "r1": "J", "r2": "U", "r3": "Y", # Standard Ranges: J-U, Y-AA
+                    "raw_data": 26 # Col AA
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -382,7 +391,8 @@ class TypeAPipeline:
                 h_map = {
                     "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
                     "skip": 7, "scrap_stat": 8, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19,
-                    "r1": "I", "r2": "T", "r3": "X" # Standard Ranges: I-T, X-Z
+                    "r1": "I", "r2": "T", "r3": "X", # Standard Ranges: I-T, X-Z
+                    "raw_data": 26 # Col AA
                 }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:

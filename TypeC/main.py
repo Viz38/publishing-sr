@@ -122,26 +122,34 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
-    html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
-    if html is None:
-        pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
-        html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
-
-    if html is None:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-        return {"type": "error", "reason": reason}
-    if len(html) < 300:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
-        return {"type": "error", "reason": "Low Content"}
-        
-    body = clean_html(html)
-    pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
+    raw_data_col = h_map.get("raw_data")
+    raw_data = row[raw_data_col] if raw_data_col is not None and len(row) > raw_data_col else ""
     
-    # Check for parked
-    parked, kw = is_parked_domain(html, body)
-    if parked:
-        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
-        return {"type": "error", "reason": "Parked"}
+    if raw_data.strip():
+        pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
+        final_url = f"https://{domain}"
+        body = raw_data.strip()
+    else:
+        html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+        if html is None:
+            pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
+            html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
+
+        if html is None:
+            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
+            return {"type": "error", "reason": reason}
+        if len(html) < 300:
+            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+            return {"type": "error", "reason": "Low Content"}
+            
+        body = clean_html(html)
+        pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
+        
+        # Check for parked
+        parked, kw = is_parked_domain(html, body)
+        if parked:
+            pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
+            return {"type": "error", "reason": "Parked"}
     
     if len(body) < 100: 
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
@@ -210,7 +218,7 @@ class TypeCPipeline:
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                all_rows = await ws.get_values(f"A{self.start_row}:Z")
+                all_rows = await ws.get_values(f"A{self.start_row}:AB")
                 data_rows = []
                 for i, r in enumerate(all_rows):
                     if len(r) < 2: continue
@@ -240,7 +248,8 @@ class TypeCPipeline:
                 h_map = {
                     "domain": 2, "dp_id": 3, "funnel_name": 4, "funnel_id": 5, "tags": 6, "company_name": 7,
                     "skip": 8, "scrap_stat": 8, "sd": 9, "ld": 10, "feed_id": 11,
-                    "r1": "I", "r2": "N", "r3": "P" # Shifted: I-N, P-R
+                    "r1": "I", "r2": "N", "r3": "P", # Shifted: I-N, P-R
+                    "raw_data": 17 # Col R
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -248,7 +257,8 @@ class TypeCPipeline:
                 h_map = {
                     "domain": 1, "dp_id": 2, "funnel_name": 3, "funnel_id": 4, "tags": 5, "company_name": 6,
                     "skip": 7, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 10,
-                    "r1": "H", "r2": "M", "r3": "O" # Standard: H-M, O-Q
+                    "r1": "H", "r2": "M", "r3": "O", # Standard: H-M, O-Q
+                    "raw_data": 17 # Col R
                 }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:
