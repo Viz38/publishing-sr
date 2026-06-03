@@ -28,11 +28,8 @@ class SystemHealthMonitor:
         self._psutil.cpu_percent(interval=None)
 
     def is_healthy(self) -> Tuple[bool, str]:
-        cpu = self._psutil.cpu_percent(interval=None)
         mem = self._psutil.virtual_memory().percent
         
-        if cpu > self.cpu_threshold:
-            return False, f"CPU too high ({cpu}%)"
         if mem > self.mem_threshold:
             return False, f"Memory too high ({mem}%)"
         return True, "Healthy"
