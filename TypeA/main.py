@@ -16,12 +16,12 @@ from urllib.parse import urljoin, urlparse
 from dotenv import load_dotenv
 
 from sr_common.config import settings
-from sr_common.clients import RateLimiter, GoogleSheetsClient
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, 
     is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager
 )
+from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher
 from sr_common.stealth import get_browser_profile
 
@@ -102,7 +102,7 @@ async def log_system_metrics():
         await asyncio.sleep(60)
 
 gemini_limiter = RateLimiter(2000)
-tracxn_limiter = RateLimiter(160)
+tracxn_limiter = MultiTierRateLimiter(os.path.join(LOGS_DIR, 'tracxn_rate_limit.db'), {'second': 100, 'minute': 1000, 'hour': 10000, 'day': 100000})
 
 async def save_snapshot(domain: str, html: str, reason: str):
     """Saves HTML snapshot for debugging purposes."""
@@ -188,14 +188,28 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
-        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
+        cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1)
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
     else:
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
-        res_p1_obj = await call_gemini_api(session, bm_p1_raw, gemini_limiter)
+        p1_coro = call_gemini_api(session, bm_p1_raw, gemini_limiter)
+
+    parts_p2 = prompts[1].split("XX")
+    p2_coro = None
+    if len(parts_p2) == 2:
+        sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
+        user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
+        cache_id2 = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
+        p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2)
     
-    llm_calls += 1
+    if p2_coro:
+        res_p1_obj, res_p2_obj = await asyncio.gather(p1_coro, p2_coro)
+        llm_calls += 2
+    else:
+        res_p1_obj = await p1_coro
+        llm_calls += 1
+
     res_p1 = res_p1_obj.text
     in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
     think_text = f"P1:\n{res_p1_obj.thinking_text}\n" if res_p1_obj.thinking_text else ""
@@ -213,17 +227,11 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
         return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
-    parts_p2 = prompts[1].split("XX")
-    if len(parts_p2) == 2:
-        sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
-        user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
-        cache_id = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
-        res_p2_obj = await call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id)
-    else:
+    if not p2_coro:
         p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
         res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
+        llm_calls += 1
     
-    llm_calls += 1
     res_p2 = res_p2_obj.text
     in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
     if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
@@ -460,14 +468,22 @@ class TypeAPipeline:
                         ) as browser:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                             writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeA"))
-                            await work_queue.join()
-                            [t.cancel() for t in tasks]
-                            await result_queue.join()
-                            writer_task.cancel()
-                            break
+                            
+                            queue_task = asyncio.create_task(work_queue.join())
+                            done, pending = await asyncio.wait([queue_task] + tasks, return_when=asyncio.FIRST_COMPLETED)
+                            
+                            if queue_task in done:
+                                [t.cancel() for t in tasks]
+                                await result_queue.join()
+                                writer_task.cancel()
+                                break
+                            else:
+                                for t in done:
+                                    if t != queue_task and t.exception():
+                                        raise t.exception()
                     except Exception as e:
-                        pipeline_logger.error(f"BROWSER ENGINE CRASHED: {e}. Restarting...")
-                        await asyncio.sleep(10)
+                        pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Restarting browser...")
+                        await asyncio.sleep(5)
                         await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager):
@@ -480,7 +496,7 @@ class TypeAPipeline:
         while True:
             idx, row = await w_q.get()
             try:
-                await monitor.wait_for_resources(logger=pipeline_logger)
+                await monitor.wait_for_resources(logger=pipeline_logger, timeout=300)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
@@ -522,22 +538,30 @@ class TypeAPipeline:
                         pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
                         tags = res["hashtags"] + ["bu_llm_sd_ld", "bu_Internal_SRprocess_TypeA"]
                         payload = {"id": res["dp_id"], "description": {"value": res["ld1"]}, "shortDescription": {"value": res["sd"]}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
-                        s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
-                        edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         
-                        f_id = res["feed_id"]
+                        async def update_dp():
+                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
+                            
+                        async def update_bm():
+                            if res["bm_id"] != "No ID":
+                                return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": res["feed_id"], "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
+                            return 200, None
+                            
+                        async def update_funnel():
+                            f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
+                            As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                            if As in (200, 201):
+                                ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                return ms
+                            return "Assign Failed"
+                            
+                        (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                        
+                        edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                         if res["bm_id"] != "No ID":
-                            s2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
                             bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
                         else:
                             bm_up = "NotUpdated"
-                        
-                        f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
-                        As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                        if As in (200, 201):
-                            ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                        else:
-                            ms = "Assign Failed"
                         fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         
                         # Find Column U/V mapping
@@ -555,6 +579,10 @@ class TypeAPipeline:
                     await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
+                if "Resource saturation" in str(e):
+                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation.")
+                    await w_q.put((idx, row))
+                    raise
                 pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()

@@ -37,12 +37,18 @@ class SystemHealthMonitor:
             return False, f"Memory too high ({mem}%)"
         return True, "Healthy"
 
-    async def wait_for_resources(self, logger=None):
-        """Pauses execution if system resources are saturated."""
+    async def wait_for_resources(self, logger=None, timeout=None):
+        """Pauses execution if system resources are saturated. Raises TimeoutError if timeout is reached."""
+        start_time = time.time()
         while True:
             healthy, reason = self.is_healthy()
             if healthy:
                 break
+            
+            if timeout is not None and (time.time() - start_time) > timeout:
+                if logger:
+                    logger.error(f"HEALTH_GATE: Timeout exceeded waiting for resources ({reason})")
+                raise TimeoutError(f"Resource saturation timeout: {reason}")
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")

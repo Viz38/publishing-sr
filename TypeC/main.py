@@ -16,12 +16,12 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 from sr_common.config import settings
-from sr_common.clients import RateLimiter, GoogleSheetsClient
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, 
     is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager
 )
+from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher
 from sr_common.stealth import get_browser_profile
 
@@ -98,7 +98,7 @@ async def log_system_metrics():
         await asyncio.sleep(60)
 
 gemini_limiter = RateLimiter(2000)
-tracxn_limiter = RateLimiter(160)
+tracxn_limiter = MultiTierRateLimiter(os.path.join(LOGS_DIR, 'tracxn_rate_limit.db'), {'second': 100, 'minute': 1000, 'hour': 10000, 'day': 100000})
 
 async def save_snapshot(domain: str, html: str, reason: str):
     """Saves HTML snapshot for debugging purposes."""
@@ -297,16 +297,21 @@ class TypeCPipeline:
                             tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                             writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                             
-                            # This will run until all work is done or an exception occurs
-                            await work_queue.join()
-                            [t.cancel() for t in tasks]
-                            await result_queue.join()
-                            writer_task.cancel()
-                            break # Successfully finished all work
+                            queue_task = asyncio.create_task(work_queue.join())
+                            done, pending = await asyncio.wait([queue_task] + tasks, return_when=asyncio.FIRST_COMPLETED)
+                            
+                            if queue_task in done:
+                                [t.cancel() for t in tasks]
+                                await result_queue.join()
+                                writer_task.cancel()
+                                break
+                            else:
+                                for t in done:
+                                    if t != queue_task and t.exception():
+                                        raise t.exception()
                     except Exception as e:
-                        pipeline_logger.error(f"BROWSER ENGINE CRASHED: {e}. Waiting for resources to restart...")
-                        # Wait and then loop back to restart AsyncCamoufox
-                        await asyncio.sleep(10)
+                        pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Waiting for resources to restart...")
+                        await asyncio.sleep(5)
                         await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map, cache_manager):
@@ -320,7 +325,7 @@ class TypeCPipeline:
             idx, row = await w_q.get()
             try:
                 # Initial resource check before starting a new row
-                await monitor.wait_for_resources(logger=pipeline_logger)
+                await monitor.wait_for_resources(logger=pipeline_logger, timeout=300)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
@@ -410,26 +415,29 @@ class TypeCPipeline:
                             pipeline_logger.info(f"BOT CLEANUP: Clearing companyLocation for {domain}")
                             
                         f_stat, sdld, fun = "N/A", "N/A", "N/A"
-                        if feed_id:
-                            s_f, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
-                            f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
+                        async def update_dp():
+                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=dp_payload, headers=HEADERS)
                             
-                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=dp_payload, headers=HEADERS)
-                            As,_ =  await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"},"comment": "This is done by Write API"}, headers=HEADERS)
-                            if As in (200,201):
-                                ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["5dc5863a2799a51cc0ff30e2"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                            else:
-                                ms="Assign Failed"
-                            sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
+                        async def update_bm():
+                            if feed_id:
+                                return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
+                            return 200, None
+                            
+                        async def update_funnel():
+                            f_id_to_move = "5dc5863a2799a51cc0ff30e2" if feed_id else "591d37b884ae06633a652496"
+                            As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                            if As in (200, 201):
+                                ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                return ms
+                            return "Assign Failed"
+                            
+                        (s1, _), (s_f, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                        
+                        sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
+                        if feed_id:
+                            f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
                             fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         else:
-                            s1, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=dp_payload, headers=HEADERS)
-                            As,_ =  await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"},"comment": "This is done by Write API"}, headers=HEADERS)
-                            if As in (200,201):
-                                ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["591d37b884ae06633a652496"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                            else:
-                                ms="Assign Failed"
-                            sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                             fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         
                         # Dynamic Tracxn status columns based on results start column r1
@@ -445,6 +453,10 @@ class TypeCPipeline:
                     await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
                     await r_q.put({'type': 'progress', 'is_success': False})
             except Exception as e:
+                if "Resource saturation" in str(e):
+                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation.")
+                    await w_q.put((idx, row))
+                    raise
                 pipeline_logger.error(f"FATAL WORKER ERROR for {row[h_map['domain']] if row else 'Unknown'}: {e}")
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
