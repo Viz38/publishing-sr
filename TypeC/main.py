@@ -490,25 +490,28 @@ class TypeCPipeline:
                         if match: processed_indices.add(int(match.group()))
                     
                     if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
-                        try:
-                            t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
-                            t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
-                            curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
-                            curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
-                            curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
-                            curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
-                            curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
-                            await t_ws.batch_update([
-                                {'range': 'B2', 'values': [[curr_in + batch_in]]},
-                                {'range': 'B3', 'values': [[curr_out + batch_out]]},
-                                {'range': 'B4', 'values': [[curr_think + batch_think]]},
-                                {'range': 'B5', 'values': [[curr_rows + batch_rows]]},
-                                {'range': 'B6', 'values': [[curr_calls + batch_calls]]}
-                            ], value_input_option='USER_ENTERED')
-                            batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
-                        except Exception as e:
-                            pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
+                        async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
+                            try:
+                                t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
+                                t_ws = await t_sheet.worksheet(pipeline_name)
+                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                                curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
+                                curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
+                                curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
+                                curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
+                                curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
+                                await t_ws.batch_update([
+                                    {'range': 'B2', 'values': [[curr_in + b_in]]},
+                                    {'range': 'B3', 'values': [[curr_out + b_out]]},
+                                    {'range': 'B4', 'values': [[curr_think + b_think]]},
+                                    {'range': 'B5', 'values': [[curr_rows + b_rows]]},
+                                    {'range': 'B6', 'values': [[curr_calls + b_calls]]}
+                                ], value_input_option='USER_ENTERED')
+                            except Exception as e:
+                                pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
+                        
+                        asyncio.create_task(_update_tracking(batch_in, batch_out, batch_think, batch_rows, batch_calls))
+                        batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
                 except Exception as e:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:

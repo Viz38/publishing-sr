@@ -5,10 +5,12 @@ from curl_cffi.requests import AsyncSession
 from scrapling import Fetcher, StealthyFetcher
 from .stealth import get_human_delay, simulate_human_movement, get_browser_profile
 
+from .utils import get_dynamic_max_workers
+
 logger = logging.getLogger("fetcher")
 
 # Shared browser semaphore to prevent CPU spikes across engines
-BROWSER_SEMAPHORE = asyncio.Semaphore(3)
+BROWSER_SEMAPHORE = asyncio.Semaphore(get_dynamic_max_workers())
 
 class StealthFetcher:
     def __init__(self, headers: Optional[Dict[str, str]] = None, timeout: int = 45):
