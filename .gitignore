@@ -21,3 +21,5 @@ prompts_output.txt
 prompt.csv
 .DS_Store
 **/.DS_Store
+*.zip
+docs/

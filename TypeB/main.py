@@ -471,123 +471,127 @@ class TypeBPipeline:
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         updates = []
         last_flush = time.time()
-        while True:
-            try:
-                # Wait up to 1.0s for an item to arrive in the queue
-                item = await asyncio.wait_for(r_q.get(), timeout=1.0)
-                
-                if isinstance(item, dict):
-                    if item.get('type') == 'progress':
-                        if item.get('is_success'): success += 1
-                        else: fail += 1
-                        r_q.task_done()
-                    elif item.get('type') == 'tokens':
-                        batch_in += item.get('in', 0)
-                        batch_out += item.get('out', 0)
-                        batch_think += item.get('think', 0)
-                        batch_rows += item.get('rows', 0)
-                        batch_calls += item.get('calls', 0)
-                        r_q.task_done()
-                    else:
-                        updates.append(item)
-                
-                # Fetch any additional items immediately available
-                while not r_q.empty() and len(updates) < 10:
-                    item = r_q.get_nowait()
-                    if isinstance(item, dict):
-                        if item.get('type') == 'progress':
-                            if item.get('is_success'): success += 1
-                            else: fail += 1
-                            r_q.task_done()
-                            continue
-                        elif item.get('type') == 'tokens':
-                            batch_in += item.get('in', 0)
-                            batch_out += item.get('out', 0)
-                            batch_think += item.get('think', 0)
-                            batch_rows += item.get('rows', 0)
-                            batch_calls += item.get('calls', 0)
-                            r_q.task_done()
-                            continue
-                    updates.append(item)
-                    system_logger.info(f"SHEET WRITER appended item for range: {item.get('range', 'Unknown')}. Total updates: {len(updates)}")
-            except asyncio.TimeoutError:
-                pass
+        
+        # Open CSV backup early so it's always available
+        import csv
+        csv_path = os.path.join(LOGS_DIR, 'results_backup.csv')
+        file_exists = os.path.exists(csv_path)
+        if not file_exists:
+            with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(["Range", "Value1", "Value2", "Value3", "Value4", "Value5", "Value6", "Value7", "Value8"])
+
+        async def _flush_to_sheets():
+            nonlocal batch_in, batch_out, batch_think, batch_rows, batch_calls, updates, last_flush
+            if not updates:
+                return
             
-            time_since_flush = time.time() - last_flush
-            if updates and (len(updates) >= 10 or time_since_flush > 30 or (success + fail) == total):
-                system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time_since_flush:.1f}s")
-                try:
-                    # Sort updates by row number to ensure perfectly sequential Google Sheets writing
-                    def get_row_num(u):
-                        m = re.search(r'\d+', u.get('range', ''))
-                        return int(m.group()) if m else 0
-                    updates.sort(key=get_row_num)
-                    
-                    # CSV Buffer Backup
+            system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time.time() - last_flush:.1f}s")
+            try:
+                def get_row_num(u):
+                    m = re.search(r'\d+', u.get('range', ''))
+                    return int(m.group()) if m else 0
+                updates.sort(key=get_row_num)
+                
+                for attempt in range(3):
                     try:
-                        import csv
-                        csv_path = os.path.join(LOGS_DIR, 'results_backup.csv')
-                        file_exists = os.path.exists(csv_path)
-                        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-                            writer = csv.writer(f)
-                            if not file_exists:
-                                writer.writerow(["Range", "Value1", "Value2", "Value3", "Value4", "Value5", "Value6", "Value7", "Value8"])
-                            for u in updates:
-                                vals = u.get('values', [[]])[0]
-                                writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
+                        await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
+                        break
+                    except asyncio.TimeoutError:
+                        pipeline_logger.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
+                        await asyncio.sleep(2)
                     except Exception as e:
-                        pipeline_logger.error(f"CSV BACKUP ERR: {e}")
-                    for attempt in range(3):
+                        pipeline_logger.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
+                        await asyncio.sleep(2)
+                else:
+                    pipeline_logger.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts.")
+                
+                for u in updates:
+                    match = re.search(r'\d+', u['range'])
+                    if match: processed_indices.add(int(match.group()))
+                
+                if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
+                    async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
                         try:
-                            await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
-                            break
-                        except asyncio.TimeoutError:
-                            pipeline_logger.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
-                            await asyncio.sleep(2)
+                            t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
+                            t_ws = await t_sheet.worksheet(pipeline_name)
+                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                            curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
+                            curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
+                            curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
+                            curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
+                            curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
+                            await asyncio.wait_for(t_ws.batch_update([
+                                {'range': 'B2', 'values': [[curr_in + b_in]]},
+                                {'range': 'B3', 'values': [[curr_out + b_out]]},
+                                {'range': 'B4', 'values': [[curr_think + b_think]]},
+                                {'range': 'B5', 'values': [[curr_rows + b_rows]]},
+                                {'range': 'B6', 'values': [[curr_calls + b_calls]]}
+                            ], value_input_option='USER_ENTERED'), timeout=30)
                         except Exception as e:
-                            pipeline_logger.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
-                            await asyncio.sleep(2)
-                    else:
-                        pipeline_logger.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts. Data is saved in results_backup.csv")
-                    for u in updates:
-                        match = re.search(r'\d+', u['range'])
-                        if match: processed_indices.add(int(match.group()))
+                            pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                     
-                    if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
-                        async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
-                            try:
-                                t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
-                                t_ws = await t_sheet.worksheet(pipeline_name)
-                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
-                                curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
-                                curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
-                                curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
-                                curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
-                                curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
-                                await asyncio.wait_for(t_ws.batch_update([
-                                    {'range': 'B2', 'values': [[curr_in + b_in]]},
-                                    {'range': 'B3', 'values': [[curr_out + b_out]]},
-                                    {'range': 'B4', 'values': [[curr_think + b_think]]},
-                                    {'range': 'B5', 'values': [[curr_rows + b_rows]]},
-                                    {'range': 'B6', 'values': [[curr_calls + b_calls]]}
-                                ], value_input_option='USER_ENTERED'), timeout=30)
-                            except Exception as e:
-                                pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
-                        
-                        asyncio.create_task(_update_tracking(batch_in, batch_out, batch_think, batch_rows, batch_calls))
-                        batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
-                except Exception as e:
-                    pipeline_logger.error(f"SHEET WRITER ERR: {e}")
-                finally:
-                    for _ in updates: r_q.task_done()
-                    updates = []
-                    last_flush = time.time()
-                    current_completed = success + fail
-                    self.report_progress(current_completed, total, success, fail)
-                    pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")
-            else: 
+                    asyncio.create_task(_update_tracking(batch_in, batch_out, batch_think, batch_rows, batch_calls))
+                    batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
+            except Exception as e:
+                pipeline_logger.error(f"SHEET WRITER ERR: {e}")
+            finally:
+                for _ in updates: r_q.task_done()
+                updates = []
+                last_flush = time.time()
                 current_completed = success + fail
                 self.report_progress(current_completed, total, success, fail)
+                pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")
+
+        try:
+            while True:
+                try:
+                    # Wait up to 1.0s for an item
+                    item = await asyncio.wait_for(r_q.get(), timeout=1.0)
+                except asyncio.TimeoutError:
+                    pass
+                else:
+                    # Process items from queue
+                    items_to_process = [item]
+                    while not r_q.empty() and len(items_to_process) < 50:
+                        items_to_process.append(r_q.get_nowait())
+                    
+                    for i in items_to_process:
+                        if isinstance(i, dict):
+                            if i.get('type') == 'progress':
+                                if i.get('is_success'): success += 1
+                                else: fail += 1
+                                r_q.task_done()
+                            elif i.get('type') == 'tokens':
+                                batch_in += i.get('in', 0)
+                                batch_out += i.get('out', 0)
+                                batch_think += i.get('think', 0)
+                                batch_rows += i.get('rows', 0)
+                                batch_calls += i.get('calls', 0)
+                                r_q.task_done()
+                            else:
+                                updates.append(i)
+                                # Immediate write-ahead to CSV
+                                try:
+                                    with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                                        writer = csv.writer(f)
+                                        vals = i.get('values', [[]])[0]
+                                        writer.writerow([i.get('range', '')] + [str(v)[:1000] for v in vals])
+                                except Exception as e:
+                                    pipeline_logger.error(f"CSV BACKUP ERR: {e}")
+                                system_logger.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
+                
+                time_since_flush = time.time() - last_flush
+                if updates and (len(updates) >= 10 or time_since_flush > 10 or (success + fail) == total):
+                    await _flush_to_sheets()
+                else:
+                    current_completed = success + fail
+                    self.report_progress(current_completed, total, success, fail)
+        except asyncio.CancelledError:
+            pipeline_logger.info("Sheet writer cancelled, flushing remaining updates...")
+            if updates:
+                await _flush_to_sheets()
+            raise
 
     def report_progress(self, curr, total, s, f):
         try:
