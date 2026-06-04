@@ -506,11 +506,10 @@ class TypeCPipeline:
             except asyncio.TimeoutError:
                 pass
             
-            if updates:
-                time_since_flush = time.time() - last_flush
-                if len(updates) >= 100 or time_since_flush > 30 or (success + fail) == total:
-                    system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time_since_flush:.1f}s")
-                    try:
+            time_since_flush = time.time() - last_flush
+            if updates and (len(updates) >= 100 or time_since_flush > 30 or (success + fail) == total):
+                system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time_since_flush:.1f}s")
+                try:
                     # Sort updates by row number to ensure perfectly sequential Google Sheets writing
                     def get_row_num(u):
                         m = re.search(r'\d+', u.get('range', ''))
@@ -529,10 +528,18 @@ class TypeCPipeline:
                             for u in updates:
                                 vals = u.get('values', [[]])[0]
                                 writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
-                    try:
-                        await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=120)
-                    except asyncio.TimeoutError:
-                        pipeline_logger.error("SHEET WRITER ERR: Google Sheets batch_update timed out after 120s! Data is saved in results_backup.csv")
+                    for attempt in range(3):
+                        try:
+                            await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
+                            break
+                        except asyncio.TimeoutError:
+                            pipeline_logger.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
+                            await asyncio.sleep(2)
+                        except Exception as e:
+                            pipeline_logger.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
+                            await asyncio.sleep(2)
+                    else:
+                        pipeline_logger.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts. Data is saved in results_backup.csv")
                     for u in updates:
                         match = re.search(r'\d+', u['range'])
                         if match: processed_indices.add(int(match.group()))
