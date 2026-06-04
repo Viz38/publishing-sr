@@ -277,7 +277,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter)
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
         m = re.search(r'^(?:FeedOutput:\s*)?(Yes|No)', bm_res, re.I | re.M)
-        f_chk = m.group(1) if m else "No"
+        f_chk = m.group(1).capitalize() if m else "No"
         if f_chk == "Yes":
             num = re.search(r"\d+", bm_res)
             if num:
