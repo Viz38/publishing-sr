@@ -532,10 +532,10 @@ class TypeBPipeline:
                             for u in updates:
                                 vals = u.get('values', [[]])[0]
                                 writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
-                    except Exception as e:
-                        pipeline_logger.error(f"CSV BACKUP ERR: {e}")
-
-                    await ws.batch_update(updates, value_input_option='USER_ENTERED')
+                    try:
+                        await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=120)
+                    except asyncio.TimeoutError:
+                        pipeline_logger.error("SHEET WRITER ERR: Google Sheets batch_update timed out after 120s! Data is saved in results_backup.csv")
                     for u in updates:
                         match = re.search(r'\d+', u['range'])
                         if match: processed_indices.add(int(match.group()))
