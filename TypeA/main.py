@@ -544,25 +544,35 @@ class TypeAPipeline:
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
                             
                         async def update_bm():
-                            if res["bm_id"] != "No ID":
-                                return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, json_data={"object": {"themeId": res["feed_id"], "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": res["dp_id"]}, "opType": "Update"}, headers=HEADERS)
+                            if res.get("feed_id"):
+                                payload = {"themeId": res["feed_id"], "status": "PUBLISHED", "companyId": res["dp_id"]}
+                                if res.get("bm_id") and res["bm_id"] != "No ID":
+                                    payload["businessModelId"] = res["bm_id"]
+                                return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": payload, "opType": "Update"}, headers=HEADERS)
                             return 200, None
                             
                         async def update_funnel():
-                            f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
+                            if res.get("bm_id") == "No ID":
+                                f_id_to_move = "64197f01a6dcff6572453ead"
+                            else:
+                                f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
+                                
                             As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200, 201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
+                                    ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                    return ms2
                                 return ms
                             return "Assign Failed"
                             
                         (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
                         
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
-                        if res["bm_id"] != "No ID":
-                            bm_up = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                        if res.get("feed_id"):
+                            f_stat = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
                         else:
-                            bm_up = "NotUpdated"
+                            f_stat = "NotUpdated"
                         fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         
                         # Find Column U/V mapping
@@ -570,7 +580,7 @@ class TypeAPipeline:
                             u_col, w_col = "V", "X"
                         else:
                             u_col, w_col = "U", "W"
-                        await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [[edits, bm_up, fun]]})
+                        await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [[edits, f_stat, fun]]})
                         await r_q.put({'type': 'progress', 'is_success': edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
                     else: await r_q.put({'type': 'progress', 'is_success': True})
                 else:

@@ -420,10 +420,17 @@ class TypeBPipeline:
                             return 200, None
                             
                         async def update_funnel():
-                            f_id_to_move = "5dc5863a2799a51cc0ff30e2" if (res["feedcheck"] == "Yes" and res["bm_id"]) else "591d37b884ae06633a652496"
+                            if res.get("feedcheck") == "No":
+                                f_id_to_move = "64197f01a6dcff6572453ead"
+                            else:
+                                f_id_to_move = "5dc5863a2799a51cc0ff30e2" if (res.get("feedcheck") == "Yes" and res.get("bm_id")) else "591d37b884ae06633a652496"
+                                
                             As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200, 201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
+                                    ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                    return ms2
                                 return ms
                             return "Assign Failed"
                             

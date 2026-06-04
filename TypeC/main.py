@@ -421,7 +421,7 @@ class TypeCPipeline:
                             return 200, None
                             
                         async def update_funnel():
-                            f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "591d37b884ae06633a652496"
+                            f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "64197f01a6dcff6572453ead"
                             As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200, 201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
