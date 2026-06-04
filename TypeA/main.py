@@ -667,7 +667,18 @@ class TypeAPipeline:
                     except Exception as e:
                         logging.error(f"CSV BACKUP ERR: {e}")
 
-                    await ws.batch_update(updates, value_input_option='USER_ENTERED')
+                    for attempt in range(3):
+                        try:
+                            await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
+                            break
+                        except asyncio.TimeoutError:
+                            logging.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
+                            await asyncio.sleep(2)
+                        except Exception as e:
+                            logging.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
+                            await asyncio.sleep(2)
+                    else:
+                        logging.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts. Data is saved in results_backup.csv")
                     for u in updates:
                         m = re.search(r'\d+', u['range'])
                         if m: processed.add(int(m.group()))
@@ -683,13 +694,13 @@ class TypeAPipeline:
                                 curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
                                 curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
                                 curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
-                                await t_ws.batch_update([
+                                await asyncio.wait_for(t_ws.batch_update([
                                     {'range': 'B2', 'values': [[curr_in + b_in]]},
                                     {'range': 'B3', 'values': [[curr_out + b_out]]},
                                     {'range': 'B4', 'values': [[curr_think + b_think]]},
                                     {'range': 'B5', 'values': [[curr_rows + b_rows]]},
                                     {'range': 'B6', 'values': [[curr_calls + b_calls]]}
-                                ], value_input_option='USER_ENTERED')
+                                ], value_input_option='USER_ENTERED'), timeout=30)
                             except Exception as e:
                                 logging.error(f"Error updating tracking sheet: {e}")
                         

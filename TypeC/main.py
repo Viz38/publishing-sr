@@ -528,6 +528,8 @@ class TypeCPipeline:
                             for u in updates:
                                 vals = u.get('values', [[]])[0]
                                 writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
+                    except Exception as e:
+                        pipeline_logger.error(f"CSV BACKUP ERR: {e}")
                     for attempt in range(3):
                         try:
                             await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
@@ -555,13 +557,13 @@ class TypeCPipeline:
                                 curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
                                 curr_rows = int(vals[3][0][0]) if len(vals) > 3 and vals[3] and vals[3][0] else 0
                                 curr_calls = int(vals[4][0][0]) if len(vals) > 4 and vals[4] and vals[4][0] else 0
-                                await t_ws.batch_update([
+                                await asyncio.wait_for(t_ws.batch_update([
                                     {'range': 'B2', 'values': [[curr_in + b_in]]},
                                     {'range': 'B3', 'values': [[curr_out + b_out]]},
                                     {'range': 'B4', 'values': [[curr_think + b_think]]},
                                     {'range': 'B5', 'values': [[curr_rows + b_rows]]},
                                     {'range': 'B6', 'values': [[curr_calls + b_calls]]}
-                                ], value_input_option='USER_ENTERED')
+                                ], value_input_option='USER_ENTERED'), timeout=30)
                             except Exception as e:
                                 pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                         
