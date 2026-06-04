@@ -462,11 +462,12 @@ class TypeBPipeline:
     async def sheet_writer(self, r_q, ws, total, gc, pipeline_name):
         processed_indices, success, fail = set(), 0, 0
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
+        updates = []
+        last_flush = time.time()
         while True:
-            updates = []
             try:
-                # Wait up to 0.2s for an item to arrive in the queue
-                item = await asyncio.wait_for(r_q.get(), timeout=0.2)
+                # Wait up to 1.0s for an item to arrive in the queue
+                item = await asyncio.wait_for(r_q.get(), timeout=1.0)
                 
                 if isinstance(item, dict):
                     if item.get('type') == 'progress':
@@ -484,7 +485,7 @@ class TypeBPipeline:
                         updates.append(item)
                 
                 # Fetch any additional items immediately available
-                while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
+                while not r_q.empty() and len(updates) < 100:
                     item = r_q.get_nowait()
                     if isinstance(item, dict):
                         if item.get('type') == 'progress':
@@ -503,7 +504,8 @@ class TypeBPipeline:
                     updates.append(item)
             except asyncio.TimeoutError:
                 pass
-            if updates:
+            
+            if updates and (len(updates) >= 100 or time.time() - last_flush > 5 or (success + fail) == total):
                 try:
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
                     for u in updates:
@@ -537,6 +539,8 @@ class TypeBPipeline:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
+                    updates = []
+                    last_flush = time.time()
                     current_completed = success + fail
                     self.report_progress(current_completed, total, success, fail)
                     pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")

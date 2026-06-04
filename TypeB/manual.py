@@ -463,16 +463,32 @@ class TypeBPipeline:
 
     async def sheet_writer(self, r_q, ws, total):
         processed_indices, success, fail = set(), 0, 0
+        updates = []
+        last_flush = time.time()
         while True:
-            updates = []
-            while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
-                item = await r_q.get()
+            try:
+                # Wait up to 1.0s for an item to arrive in the queue
+                item = await asyncio.wait_for(r_q.get(), timeout=1.0)
                 if isinstance(item, dict) and item.get('type') == 'progress':
                     if item.get('is_success'): success += 1
                     else: fail += 1
-                    r_q.task_done(); continue
-                updates.append(item)
-            if updates:
+                    r_q.task_done()
+                else:
+                    updates.append(item)
+                
+                # Fetch any additional items immediately available
+                while not r_q.empty() and len(updates) < 100:
+                    item = r_q.get_nowait()
+                    if isinstance(item, dict) and item.get('type') == 'progress':
+                        if item.get('is_success'): success += 1
+                        else: fail += 1
+                        r_q.task_done()
+                        continue
+                    updates.append(item)
+            except asyncio.TimeoutError:
+                pass
+            
+            if updates and (len(updates) >= 100 or time.time() - last_flush > 5 or (success + fail) == total):
                 try:
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
                     for u in updates:
@@ -482,13 +498,14 @@ class TypeBPipeline:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
+                    updates = []
+                    last_flush = time.time()
                     current_completed = success + fail
                     self.report_progress(current_completed, total, success, fail)
                     pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")
             else: 
                 current_completed = success + fail
                 self.report_progress(current_completed, total, success, fail)
-            await asyncio.sleep(1)
 
     def report_progress(self, curr, total, s, f):
         try:
