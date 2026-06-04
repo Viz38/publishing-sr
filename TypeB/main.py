@@ -549,7 +549,9 @@ class TypeBPipeline:
                     # Wait up to 1.0s for an item
                     item = await asyncio.wait_for(r_q.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    pass
+                    if updates and time.time() - last_flush > 60:
+                        await _flush_to_sheets()
+                    continue
                 else:
                     # Process items from queue
                     items_to_process = [item]
