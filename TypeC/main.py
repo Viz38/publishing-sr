@@ -421,7 +421,7 @@ class TypeCPipeline:
                             return 200, None
                             
                         async def update_funnel():
-                            f_id_to_move = "5dc5863a2799a51cc0ff30e2" if feed_id else "591d37b884ae06633a652496"
+                            f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "591d37b884ae06633a652496"
                             As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                             if As in (200, 201):
                                 ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -505,8 +505,29 @@ class TypeCPipeline:
             except asyncio.TimeoutError:
                 pass
             
-            if updates and (len(updates) >= 100 or time.time() - last_flush > 5 or (success + fail) == total):
+            if updates and (len(updates) >= 100 or time.time() - last_flush > 30 or (success + fail) == total):
                 try:
+                    # Sort updates by row number to ensure perfectly sequential Google Sheets writing
+                    def get_row_num(u):
+                        m = re.search(r'\d+', u.get('range', ''))
+                        return int(m.group()) if m else 0
+                    updates.sort(key=get_row_num)
+                    
+                    # CSV Buffer Backup
+                    try:
+                        import csv
+                        csv_path = os.path.join(LOGS_DIR, 'results_backup.csv')
+                        file_exists = os.path.exists(csv_path)
+                        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                            writer = csv.writer(f)
+                            if not file_exists:
+                                writer.writerow(["Range", "Value1", "Value2", "Value3", "Value4", "Value5", "Value6", "Value7", "Value8"])
+                            for u in updates:
+                                vals = u.get('values', [[]])[0]
+                                writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
+                    except Exception as e:
+                        pipeline_logger.error(f"CSV BACKUP ERR: {e}")
+
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
                     for u in updates:
                         match = re.search(r'\d+', u['range'])

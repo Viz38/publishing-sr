@@ -505,8 +505,29 @@ class TypeBPipeline:
             except asyncio.TimeoutError:
                 pass
             
-            if updates and (len(updates) >= 100 or time.time() - last_flush > 5 or (success + fail) == total):
+            if updates and (len(updates) >= 100 or time.time() - last_flush > 30 or (success + fail) == total):
                 try:
+                    # Sort updates by row number to ensure perfectly sequential Google Sheets writing
+                    def get_row_num(u):
+                        m = re.search(r'\d+', u.get('range', ''))
+                        return int(m.group()) if m else 0
+                    updates.sort(key=get_row_num)
+                    
+                    # CSV Buffer Backup
+                    try:
+                        import csv
+                        csv_path = os.path.join(LOGS_DIR, 'results_backup.csv')
+                        file_exists = os.path.exists(csv_path)
+                        with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                            writer = csv.writer(f)
+                            if not file_exists:
+                                writer.writerow(["Range", "Value1", "Value2", "Value3", "Value4", "Value5", "Value6", "Value7", "Value8"])
+                            for u in updates:
+                                vals = u.get('values', [[]])[0]
+                                writer.writerow([u.get('range', '')] + [str(v)[:1000] for v in vals]) # Truncate long strings for CSV
+                    except Exception as e:
+                        pipeline_logger.error(f"CSV BACKUP ERR: {e}")
+
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
                     for u in updates:
                         match = re.search(r'\d+', u['range'])
