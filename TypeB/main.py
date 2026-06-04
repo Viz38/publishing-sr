@@ -509,11 +509,15 @@ class TypeBPipeline:
                             r_q.task_done()
                             continue
                     updates.append(item)
+                    system_logger.info(f"SHEET WRITER appended item for range: {item.get('range', 'Unknown')}. Total updates: {len(updates)}")
             except asyncio.TimeoutError:
                 pass
             
-            if updates and (len(updates) >= 100 or time.time() - last_flush > 30 or (success + fail) == total):
-                try:
+            if updates:
+                time_since_flush = time.time() - last_flush
+                if len(updates) >= 100 or time_since_flush > 30 or (success + fail) == total:
+                    system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time_since_flush:.1f}s")
+                    try:
                     # Sort updates by row number to ensure perfectly sequential Google Sheets writing
                     def get_row_num(u):
                         m = re.search(r'\d+', u.get('range', ''))
