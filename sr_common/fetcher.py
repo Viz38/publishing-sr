@@ -30,33 +30,25 @@ class StealthFetcher:
         logger.info(f"FETCH START: {url}")
 
         # TIER 0: curl-cffi (TLS/HTTP2 Impersonation)
-        try:
-            logger.info(f"TIER 0: curl-cffi Fetch for {url}")
-            async with AsyncSession(impersonate="chrome120") as s:
-                resp = await s.get(url, headers=self.headers, timeout=self.timeout, verify=False)
-                if resp.status_code == 200:
-                    content = resp.text
-                    if self._is_valid(content):
-                        logger.info(f"TIER 0 SUCCESS: {url} -> {resp.url}")
-                        return content, str(resp.url), "Success"
-                    logger.warning(f"TIER 0 FAIL: {url} | Captcha/Low Content")
-                else:
-                    logger.warning(f"TIER 0 FAIL: {url} | Status: {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"TIER 0 ERR: {url} | {e}")
-
-        # TIER 1: Scrapling (Basic Request)
-        try:
-            logger.info(f"TIER 1: Scrapling Fetch for {url}")
-            s_fetcher = Fetcher()
-            s_resp = await asyncio.to_thread(s_fetcher.get, url)
-            if s_resp.status == 200:
-                content = s_resp.text
-                if self._is_valid(content):
-                    logger.info(f"TIER 1 SUCCESS: {url} -> {s_resp.url}")
-                    return content, str(s_resp.url), "Success"
-        except Exception as e:
-            logger.warning(f"TIER 1 ERR: {url} | {e}")
+        urls_to_try = [url]
+        if url.startswith("https://"):
+            urls_to_try.append(url.replace("https://", "http://", 1))
+            
+        for attempt_url in urls_to_try:
+            try:
+                logger.info(f"TIER 0: curl-cffi Fetch for {attempt_url}")
+                async with AsyncSession(impersonate="chrome120") as s:
+                    resp = await s.get(attempt_url, headers=self.headers, timeout=self.timeout, verify=False)
+                    if resp.status_code == 200:
+                        content = resp.text
+                        if self._is_valid(content):
+                            logger.info(f"TIER 0 SUCCESS: {attempt_url} -> {resp.url}")
+                            return content, str(resp.url), "Success"
+                        logger.warning(f"TIER 0 FAIL: {attempt_url} | Captcha/Low Content")
+                    else:
+                        logger.warning(f"TIER 0 FAIL: {attempt_url} | Status: {resp.status_code}")
+            except Exception as e:
+                logger.warning(f"TIER 0 ERR: {attempt_url} | {e}")
 
         # TIER 2: Camoufox (Full Browser + Behavior)
         if browser:
@@ -82,7 +74,6 @@ class StealthFetcher:
                         
                         if response and response.status == 200:
                             await simulate_human_movement(page)
-                            await asyncio.sleep(get_human_delay(2.0, 1.0))
                             content = await page.content()
                             if self._is_valid(content, min_len=500):
                                 logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")

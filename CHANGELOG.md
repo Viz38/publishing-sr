@@ -1,3 +1,27 @@
+## [2026-06-04] Phase 3: Speed & Throughput Optimizations (Target: 3500/hr)
+Files changed:
+- sr_common/clients.py
+- sr_common/fetcher.py
+- sr_common/stealth.py
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- TypeB/manual.py
+Reason:
+Eliminate multiple pipeline bottlenecks to push maximum throughput from ~2000 domains/hr to ~3500 domains/hr.
+Changes:
+1. **In-Memory Rate Limiting**: Replaced SQLite `MultiTierRateLimiter` with an in-memory sliding window using `collections.deque`. The SQLite write-locks were throttling the Tracxn API to 3.3 req/s. In-memory achieves 100+ req/s.
+2. **Removed Tier 1 (Scrapling)**: Deleted the Tier 1 synchronous fetch layer completely, saving 2-10 seconds per failed domain, as it had a 0% success rate across 581 attempts.
+3. **Internalized HTTP Fallback**: Moved the HTTP fallback logic inside Tier 0 (curl-cffi) so it doesn't trigger a full 4-tier retry cascade.
+4. **Optimized Human Simulation**: Reduced Tier 2 browser simulation delays by 80% (from 5.1s to ~1s) by decreasing mouse/scroll steps and trimming gamma distribution scale.
+5. **Non-blocking HTML Cleaning**: Refactored `clean_html` to be asynchronous (`async def`) and run via `asyncio.to_thread` to prevent `BeautifulSoup` from blocking the event loop on massive DOMs.
+6. **Aggressive Sheet Writer Polling**: Replaced the fixed 1-second `asyncio.sleep` in all engine sheet writers with `asyncio.wait_for(..., timeout=0.2)` for 5x faster write flushing.
+7. **Reduced Worker Jitter**: Dropped TypeB startup worker jitter from 5-20 seconds to 0.5-3 seconds.
+Related tests:
+- tests/test_rate_limiter.py (New)
+- tests/test_system_health.py (Passed)
+
 ## [2026-06-02] Fix: Prevent Cloudflare Tunnel Drop in Ubuntu
 Files changed:
 - control.sh

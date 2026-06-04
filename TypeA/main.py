@@ -146,9 +146,6 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         combined = raw_data.strip()
     else:
         html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
-        if html is None:
-            pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
-            html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
 
         if html is None:
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
@@ -157,7 +154,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
             return {"type": "error", "reason": "Low Content"}
         
-        home_text = clean_html(html)
+        home_text = await clean_html(html)
         parked, kw = is_parked_domain(html, home_text)
         if parked:
             pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
@@ -176,7 +173,11 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         if target_urls:
             pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
             res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
-            body_results.extend([clean_html(r[0]) for r in res if r[0]])
+            body_results = []
+            for r in res:
+                if r[0]:
+                    cleaned = await clean_html(r[0])
+                    body_results.append(cleaned)
         
         combined = "\n\n".join(body_results)
     pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)}")
@@ -592,21 +593,45 @@ class TypeAPipeline:
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         while True:
             updates = []
-            while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
-                item = await r_q.get()
+            try:
+                # Wait up to 0.2s for an item to arrive in the queue
+                item = await asyncio.wait_for(r_q.get(), timeout=0.2)
+                
                 if isinstance(item, dict):
                     if item.get('type') == 'progress':
                         if item.get('is_success'): s += 1
                         else: f += 1
-                        r_q.task_done(); continue
-                    if item.get('type') == 'tokens':
+                        r_q.task_done()
+                    elif item.get('type') == 'tokens':
                         batch_in += item.get('in', 0)
                         batch_out += item.get('out', 0)
                         batch_think += item.get('think', 0)
                         batch_rows += item.get('rows', 0)
                         batch_calls += item.get('calls', 0)
-                        r_q.task_done(); continue
-                updates.append(item)
+                        r_q.task_done()
+                    else:
+                        updates.append(item)
+                
+                # Fetch any additional items immediately available
+                while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
+                    item = r_q.get_nowait()
+                    if isinstance(item, dict):
+                        if item.get('type') == 'progress':
+                            if item.get('is_success'): s += 1
+                            else: f += 1
+                            r_q.task_done()
+                            continue
+                        elif item.get('type') == 'tokens':
+                            batch_in += item.get('in', 0)
+                            batch_out += item.get('out', 0)
+                            batch_think += item.get('think', 0)
+                            batch_rows += item.get('rows', 0)
+                            batch_calls += item.get('calls', 0)
+                            r_q.task_done()
+                            continue
+                    updates.append(item)
+            except asyncio.TimeoutError:
+                pass
             if updates:
                 try:
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
@@ -646,7 +671,6 @@ class TypeAPipeline:
             else: 
                 current_completed = s + f
                 self.report_progress(current_completed, total, s, f)
-            await asyncio.sleep(1)
 
     def report_progress(self, curr, total, s, f):
         try:

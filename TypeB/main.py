@@ -136,9 +136,6 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         body = raw_data.strip()
     else:
         html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
-        if html is None:
-            pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
-            html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
 
         if html is None:
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
@@ -147,7 +144,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
             return {"type": "error", "reason": "Low Content"}
             
-        body = clean_html(html)
+        body = await clean_html(html)
         pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
         
         # Check for parked
@@ -361,13 +358,13 @@ class TypeBPipeline:
                     except Exception as e:
                         pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Restarting browser...")
                         await asyncio.sleep(5)
-                        await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
+        await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager):
         monitor = SystemHealthMonitor()
         import random
         # Jitter start to prevent CPU storm
-        await asyncio.sleep(random.uniform(5.0, 20.0))
+        await asyncio.sleep(random.uniform(0.5, 3.0))
         while True:
             idx, row = await w_q.get()
             try:
@@ -404,11 +401,6 @@ class TypeBPipeline:
                     if self.mode != "phase2":
                         r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                         r3_end = "W" if r3 == "U" else "V"
-                        # For Type B, the first result range is I:S or J:T
-                        # Wait, the current code has H:P? Let's check mapping.
-                        # H is 7, P is 15.
-                        # If shifted: I (8), Q (16).
-                        # I'll use the h_map letters.
                         
                         await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
@@ -444,11 +436,6 @@ class TypeBPipeline:
                         else:
                             fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                         
-                        # Column O/P mapping
-                        o_col, s_col = ("P", "T") if h_map["r1"] == "I" else ("O", "S") # Wait, I'll check indices.
-                        # Standard: O is 14, S is 18.
-                        # If r1 is I (8), then O (14) is correct.
-                        # If r1 is J (9), then P (15) is correct.
                         if h_map["r1"] == "J":
                             o_col, s_col = "P", "T"
                         else:
@@ -477,20 +464,45 @@ class TypeBPipeline:
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         while True:
             updates = []
-            while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
-                item = await r_q.get()
-                if isinstance(item, dict) and item.get('type') == 'progress':
-                    if item.get('is_success'): success += 1
-                    else: fail += 1
-                    r_q.task_done(); continue
-                if isinstance(item, dict) and item.get('type') == 'tokens':
-                    batch_in += item.get('in', 0)
-                    batch_out += item.get('out', 0)
-                    batch_think += item.get('think', 0)
-                    batch_rows += item.get('rows', 0)
-                    batch_calls += item.get('calls', 0)
-                    r_q.task_done(); continue
-                updates.append(item)
+            try:
+                # Wait up to 0.2s for an item to arrive in the queue
+                item = await asyncio.wait_for(r_q.get(), timeout=0.2)
+                
+                if isinstance(item, dict):
+                    if item.get('type') == 'progress':
+                        if item.get('is_success'): success += 1
+                        else: fail += 1
+                        r_q.task_done()
+                    elif item.get('type') == 'tokens':
+                        batch_in += item.get('in', 0)
+                        batch_out += item.get('out', 0)
+                        batch_think += item.get('think', 0)
+                        batch_rows += item.get('rows', 0)
+                        batch_calls += item.get('calls', 0)
+                        r_q.task_done()
+                    else:
+                        updates.append(item)
+                
+                # Fetch any additional items immediately available
+                while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
+                    item = r_q.get_nowait()
+                    if isinstance(item, dict):
+                        if item.get('type') == 'progress':
+                            if item.get('is_success'): success += 1
+                            else: fail += 1
+                            r_q.task_done()
+                            continue
+                        elif item.get('type') == 'tokens':
+                            batch_in += item.get('in', 0)
+                            batch_out += item.get('out', 0)
+                            batch_think += item.get('think', 0)
+                            batch_rows += item.get('rows', 0)
+                            batch_calls += item.get('calls', 0)
+                            r_q.task_done()
+                            continue
+                    updates.append(item)
+            except asyncio.TimeoutError:
+                pass
             if updates:
                 try:
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
@@ -531,13 +543,11 @@ class TypeBPipeline:
             else: 
                 current_completed = success + fail
                 self.report_progress(current_completed, total, success, fail)
-            await asyncio.sleep(1)
 
     def report_progress(self, curr, total, s, f):
         try:
             with open(".progress.json", "w") as file: json.dump({"current": curr, "total": total, "success": s, "fail": f}, file)
         except: pass
-
 async def main():
     import sys
     row = int(sys.argv[1]) if len(sys.argv) > 1 else 3

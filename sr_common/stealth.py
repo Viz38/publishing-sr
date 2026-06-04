@@ -37,7 +37,7 @@ async def simulate_human_movement(page):
         viewport = page.viewport_size or {"width": 1280, "height": 720}
         
         # 1. Non-linear mouse movement (Bézier curve)
-        steps = random.randint(3, 6)
+        steps = random.randint(1, 2)
         for _ in range(steps):
             start_x = random.randint(0, viewport["width"])
             start_y = random.randint(0, viewport["height"])
@@ -45,14 +45,14 @@ async def simulate_human_movement(page):
             end_y = random.randint(0, viewport["height"])
             
             await _move_mouse_bezier(page, start_x, start_y, end_x, end_y)
-            await asyncio.sleep(get_human_delay(1.5, 0.2))
+            await asyncio.sleep(get_human_delay(0.8, 0.1))
             
         # 2. Variable scrolls
-        scroll_steps = random.randint(2, 5)
+        scroll_steps = random.randint(1, 2)
         for _ in range(scroll_steps):
             amount = random.randint(150, 500)
             await page.mouse.wheel(0, amount)
-            await asyncio.sleep(get_human_delay(1.2, 0.4))
+            await asyncio.sleep(get_human_delay(0.5, 0.2))
             
     except Exception as e:
         logger.warning(f"STEALTH_HUMAN_SIM_ERR: {e}")

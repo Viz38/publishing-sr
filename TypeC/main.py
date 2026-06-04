@@ -131,9 +131,6 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
         body = raw_data.strip()
     else:
         html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
-        if html is None:
-            pipeline_logger.warning(f"PROCESS FAILED HTTPS for {domain}. Retrying with HTTP...")
-            html, final_url, reason = await fetcher.fetch(browser, f"http://{domain}")
 
         if html is None:
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
@@ -142,7 +139,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
             pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
             return {"type": "error", "reason": "Low Content"}
             
-        body = clean_html(html)
+        body = await clean_html(html)
         pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
         
         # Check for parked
@@ -463,25 +460,49 @@ class TypeCPipeline:
                 w_q.task_done()
 
     async def sheet_writer(self, r_q, ws, total, gc, pipeline_name):
-        processed_indices, success_count, fail_count = set(), 0, 0
+        processed_indices, success, fail = set(), 0, 0
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         while True:
             updates = []
-            while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
-                item = await r_q.get()
+            try:
+                # Wait up to 0.2s for an item to arrive in the queue
+                item = await asyncio.wait_for(r_q.get(), timeout=0.2)
+                
                 if isinstance(item, dict):
                     if item.get('type') == 'progress':
-                        if item.get('is_success'): success_count += 1
-                        else: fail_count += 1
-                        r_q.task_done(); continue
-                    if item.get('type') == 'tokens':
+                        if item.get('is_success'): success += 1
+                        else: fail += 1
+                        r_q.task_done()
+                    elif item.get('type') == 'tokens':
                         batch_in += item.get('in', 0)
                         batch_out += item.get('out', 0)
                         batch_think += item.get('think', 0)
                         batch_rows += item.get('rows', 0)
                         batch_calls += item.get('calls', 0)
-                        r_q.task_done(); continue
-                updates.append(item)
+                        r_q.task_done()
+                    else:
+                        updates.append(item)
+                
+                # Fetch any additional items immediately available
+                while not r_q.empty() and len(updates) < CONFIG["BATCH_SIZE"]:
+                    item = r_q.get_nowait()
+                    if isinstance(item, dict):
+                        if item.get('type') == 'progress':
+                            if item.get('is_success'): success += 1
+                            else: fail += 1
+                            r_q.task_done()
+                            continue
+                        elif item.get('type') == 'tokens':
+                            batch_in += item.get('in', 0)
+                            batch_out += item.get('out', 0)
+                            batch_think += item.get('think', 0)
+                            batch_rows += item.get('rows', 0)
+                            batch_calls += item.get('calls', 0)
+                            r_q.task_done()
+                            continue
+                    updates.append(item)
+            except asyncio.TimeoutError:
+                pass
             if updates:
                 try:
                     await ws.batch_update(updates, value_input_option='USER_ENTERED')
@@ -516,13 +537,12 @@ class TypeCPipeline:
                     pipeline_logger.error(f"SHEET WRITER ERR: {e}")
                 finally:
                     for _ in updates: r_q.task_done()
-                    current_completed = success_count + fail_count
-                    self.report_progress(current_completed, total, success_count, fail_count)
-                    pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success_count} | Fail: {fail_count}")
+                    current_completed = success + fail
+                    self.report_progress(current_completed, total, success, fail)
+                    pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")
             else: 
-                current_completed = success_count + fail_count
-                self.report_progress(current_completed, total, success_count, fail_count)
-            await asyncio.sleep(1)
+                current_completed = success + fail
+                self.report_progress(current_completed, total, success, fail)
 
     def report_progress(self, curr, total, success, fail):
         try:

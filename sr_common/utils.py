@@ -325,13 +325,17 @@ async def call_tracxn_api(session: aiohttp.ClientSession, url: str, limiter, met
             attempt += 1
     return 500, None
 
-def clean_html(html: str) -> str:
+async def clean_html(html: str) -> str:
     if not html: return ""
-    from bs4 import BeautifulSoup
-    soup = BeautifulSoup(html, 'lxml')
-    for s in soup(['script', 'style', 'nav', 'footer', 'header']):
-        s.decompose()
-    return " ".join(soup.get_text(separator=' ').split())
+    
+    def _clean(h):
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(h, 'lxml')
+        for s in soup(['script', 'style', 'nav', 'footer', 'header']):
+            s.decompose()
+        return " ".join(soup.get_text(separator=' ').split())
+        
+    return await asyncio.to_thread(_clean, html)
 
 def extract_descriptions(text: str) -> Tuple[str, str]:
     if not text or len(text) < 10:
