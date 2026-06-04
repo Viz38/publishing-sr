@@ -624,7 +624,7 @@ class TypeAPipeline:
                         updates.append(item)
                 
                 # Fetch any additional items immediately available
-                while not r_q.empty() and len(updates) < 150:
+                while not r_q.empty() and len(updates) < 10:
                     item = r_q.get_nowait()
                     if isinstance(item, dict):
                         if item.get('type') == 'progress':
@@ -644,7 +644,7 @@ class TypeAPipeline:
             except asyncio.TimeoutError:
                 pass
             
-            if updates and (len(updates) >= 150 or time.time() - last_flush > 30 or (s + f) == total):
+            if updates and (len(updates) >= 10 or time.time() - last_flush > 30 or (s + f) == total):
                 try:
                     # Sort updates by row number to ensure perfectly sequential Google Sheets writing
                     def get_row_num(u):

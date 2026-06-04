@@ -485,7 +485,7 @@ class TypeCPipeline:
                         updates.append(item)
                 
                 # Fetch any additional items immediately available
-                while not r_q.empty() and len(updates) < 100:
+                while not r_q.empty() and len(updates) < 10:
                     item = r_q.get_nowait()
                     if isinstance(item, dict):
                         if item.get('type') == 'progress':
@@ -507,7 +507,7 @@ class TypeCPipeline:
                 pass
             
             time_since_flush = time.time() - last_flush
-            if updates and (len(updates) >= 100 or time_since_flush > 30 or (success + fail) == total):
+            if updates and (len(updates) >= 10 or time_since_flush > 30 or (success + fail) == total):
                 system_logger.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time_since_flush:.1f}s")
                 try:
                     # Sort updates by row number to ensure perfectly sequential Google Sheets writing
