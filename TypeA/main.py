@@ -188,7 +188,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
-        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
+        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined
         cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
         p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1)
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging

@@ -163,11 +163,11 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
-        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body[:20000]
+        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
         res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
     else:
-        p1 = prompts[0].replace("XX", body[:20000])
+        p1 = prompts[0].replace("XX", body[:40000])
         res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
     
     llm_calls += 1

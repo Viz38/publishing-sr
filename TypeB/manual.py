@@ -251,7 +251,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
         return {"type": "error", "reason": "Low content"}
         
-    p1 = prompts[0].replace("XX", body[:20000])
+    p1 = prompts[0].replace("XX", body)
     res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
     res_p1 = res_p1_obj.text
     in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
