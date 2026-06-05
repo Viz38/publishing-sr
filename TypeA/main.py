@@ -366,6 +366,7 @@ class TypeAPipeline:
                 data_rows = []
                 for i, r in enumerate(all_rows):
                     if len(r) < 2: continue
+                    r.extend([""] * max(0, 40 - len(r)))
                     real_idx = self.start_row + i
                     # Detect if row is a header or engine label
                     if r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
@@ -529,67 +530,81 @@ class TypeAPipeline:
                     is_success = res.get("type") == "success"
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"].get("think", 0), 'rows': res.get("llm_rows", 0) if is_success else 0, 'calls': res.get("llm_calls", 0) if is_success else 0})
 
-                if res["type"] == "success":
-                    if self.mode != "phase2":
+                is_success = res["type"] == "success"
+                is_full_success = is_success and res.get("bm_id") and res.get("bm_id") != "No ID" and res.get("feed_id")
+
+                if self.mode != "phase2":
+                    if is_success:
                         r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                         r3_end = "AA" if r3 == "Y" else "Z"
                         await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
+                    else:
+                        reason = res.get('reason', 'Failed')
+                        if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
+                            reason = "Unable To Scrap"
+                        pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
+                        stat_col = h_map["r1"]
+                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
+
+                if self.mode != "phase1" and (is_success or self.mode != "phase2"):
+                    pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
+                    dp_id = row[h_map["dp_id"]]
+                    funnel_id = row[h_map["funnel_id"]]
                     
-                    if self.mode != "phase1":
-                        pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
-                        tags = res["hashtags"] + ["bu_llm_sd_ld", "bu_Internal_SRprocess_TypeA"]
-                        payload = {"id": res["dp_id"], "description": {"value": res["ld1"]}, "shortDescription": {"value": res["sd"]}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
-                        
-                        async def update_dp():
+                    async def update_dp():
+                        sd = res.get("sd") if is_success else None
+                        ld = res.get("ld1") if is_success else None
+                        if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
+                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
+                            tags = hashtags + ["bu_llm_sd_ld", "bu_Internal_SRprocess_TypeA"]
+                            payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
-                            
-                        async def update_bm():
-                            if res.get("feed_id"):
-                                payload = {"themeId": res["feed_id"], "status": "PUBLISHED", "companyId": res["dp_id"]}
-                                if res.get("bm_id") and res["bm_id"] != "No ID":
-                                    payload["businessModelId"] = res["bm_id"]
-                                return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": payload, "opType": "Update"}, headers=HEADERS)
-                            return 200, None
-                            
-                        async def update_funnel():
-                            if res.get("bm_id") == "No ID":
-                                f_id_to_move = "64197f01a6dcff6572453ead"
-                            else:
-                                f_id_to_move = "5dc5863a2799a51cc0ff30e2" # Moved to Published
-                                
-                            As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                            if As in (200, 201):
-                                ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                                if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
-                                    ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": res["funnel_id"], "domainProfileId": res["dp_id"], "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                                    return ms2
-                                return ms
-                            return "Assign Failed"
-                            
-                        (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                        return 200, None
                         
+                    async def update_bm():
+                        if is_full_success:
+                            payload = {"themeId": res["feed_id"], "status": "PUBLISHED", "companyId": dp_id, "businessModelId": res["bm_id"]}
+                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": payload, "opType": "Update"}, headers=HEADERS)
+                        return 200, None
+                        
+                    async def update_funnel():
+                        f_id_to_move = "5dc5863a2799a51cc0ff30e2" if is_full_success else "64197f01a6dcff6572453ead"
+                        As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                        if As in (200, 201):
+                            ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                            if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
+                                ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                                return ms2
+                            return ms
+                        return "Assign Failed"
+                        
+                    (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                    
+                    sd = res.get("sd") if is_success else None
+                    ld = res.get("ld1") if is_success else None
+                    if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
-                        if res.get("feed_id"):
-                            f_stat = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
-                        else:
-                            f_stat = "NotUpdated"
-                        fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
+                    else:
+                        edits = "NotUpdated"
                         
-                        # Find Column U/V mapping
-                        if h_map["r1"] == "J":
-                            u_col, w_col = "V", "X"
-                        else:
-                            u_col, w_col = "U", "W"
-                        await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [[edits, f_stat, fun]]})
-                        await r_q.put({'type': 'progress', 'is_success': edits in ("Done", "Duplicate/Already Moved", "Funnel State Conflicts")})
-                    else: await r_q.put({'type': 'progress', 'is_success': True})
-                else:
-                    reason = res.get('reason', 'Failed')
-                    pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                    stat_col = h_map["r1"]
-                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
-                    await r_q.put({'type': 'progress', 'is_success': False})
+                    if is_full_success:
+                        f_stat = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                    else:
+                        f_stat = "NotUpdated"
+                        
+                    if ms in (200, 201):
+                        fun = "Sent Back to Discovery" if not is_full_success else "Done"
+                    else:
+                        fun = "Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err")
+                    
+                    if h_map["r1"] == "J":
+                        u_col, w_col = "V", "X"
+                    else:
+                        u_col, w_col = "U", "W"
+                    await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [[edits, f_stat, fun]]})
+                    
+                await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 if "Resource saturation" in str(e):
                     pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation.")

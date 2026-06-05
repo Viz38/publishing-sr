@@ -1,3 +1,23 @@
+## [2026-06-05] Standardize Discovery Routing
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Ensure that any partial run or error ("Unable To Scrap", "Low Content", "Parked", "LLM failed") prevents Feed/BM association while still allowing SD/LD updates (if available) and moving the Funnel to "Sent Back to Discovery". Also unified the scrape failure reasons to "Unable To Scrap" to maintain consistent Google Sheet columns. Skipped this fallback for Phase 2 failures.
+Related tests:
+N/A
+
+## [2026-06-05] Fix IndexError During Sheets Processing
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+Resolved a "list index out of range" FATAL WORKER ERROR where processing domains with trailing empty columns (like tags, company_name) crashed the pipeline. Google Sheets `get_values` dynamically strips trailing empty cells in a row, which caused the indexing to fail. Added a row-padding mechanism to ensure all rows have at least 40 columns.
+Related tests:
+N/A
+
 ## [2026-06-05] Update Check Improvement
 Files changed:
 - control.sh
