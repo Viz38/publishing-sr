@@ -215,8 +215,13 @@ check_for_updates() {
         read -p "Do you want to update now? (y/n): " confirm
         if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
             stop_all
+            echo -e "${BLUE}🗑️  Removing uv.lock...${NC}"
+            rm -f uv.lock
             echo -e "${BLUE}📥 Pulling new code...${NC}"
-            git pull origin main
+            if ! git pull --force origin main; then
+                echo -e "${RED}❌ Update failed! Please check the Git errors above.${NC}"
+                return
+            fi
             echo -e "${GREEN}✅ Update completed successfully.${NC}"
             read -p "Hit ENTER to exit and restart the script manually..."
             exit 0

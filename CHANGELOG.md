@@ -1,3 +1,11 @@
+## [2026-06-05] Update Check Improvement
+Files changed:
+- control.sh
+Reason:
+Improve the "Check for Updates" functionality to ensure a clean pull by removing uv.lock and using git pull --force. Added proper error handling if the git pull fails.
+Related tests:
+N/A
+
 ## [2026-06-04] Phase 3: Speed & Throughput Optimizations (Target: 3500/hr)
 Files changed:
 - sr_common/clients.py
