@@ -430,6 +430,22 @@ class TypeBPipeline:
                             tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
                             if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
                             payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
+                            
+                            try:
+                                eh_status, eh_res = await call_tracxn_api(
+                                    session, 
+                                    f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
+                                    tracxn_limiter, method="get", headers=HEADERS
+                                )
+                                if eh_status == 200 and isinstance(eh_res, list):
+                                    for item in eh_res:
+                                        a_name = item.get("attributeName")
+                                        if a_name in ("foundedYear", "companyLocation") and item.get("createdBy") == "publish.edits@tracxn.com":
+                                            payload[a_name] = {"value": None}
+                                            pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
+                            except Exception as eh_err:
+                                pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                                
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=payload, headers=HEADERS)
                         return 200, None
                         

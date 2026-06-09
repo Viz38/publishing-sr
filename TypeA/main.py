@@ -133,10 +133,45 @@ def extract_links(html: str, base_url: str) -> Set[str]:
             links.add(url.split('#')[0].rstrip('/'))
     return links
 
+def merge_and_extract_json(input_text, sf_arr=None):
+    if isinstance(input_text, list):
+        afs_arr = input_text
+    else:
+        json_patterns = [
+            r'(\[\s*\{.*?\}\s*\])',
+            r'```json\s*(\[\s*\{.*?\}\s*\])\s*```',
+            r'JSON:\s*(\[\s*\{.*?\}\s*\])'
+        ]
+        json_str = None
+        for pattern in json_patterns:
+            match = re.search(pattern, str(input_text), re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                break
+        
+        if not json_str:
+            return None
+            
+        try:
+            json_str = json_str.replace("'", '"')
+            json_str = re.sub(r':\s*(YES|NO)\s*([,}])', r': "\1"\2', json_str)
+            json_str = re.sub(r',\s*\]', ']', json_str)
+            afs_arr = json.loads(json_str)
+        except json.JSONDecodeError:
+            return None
+
+    sf_arr = sf_arr or []
+    try:
+        afs_dict = {item['id']: item['value'] for item in afs_arr if 'id' in item}
+        sf_dict = {item['id']: item['value'] for item in sf_arr if 'id' in item}
+        merged_dict = {**afs_dict, **sf_dict}
+        return [{'id': k, 'value': v} for k, v in merged_dict.items()]
+    except (KeyError, TypeError):
+        return None
+
 async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
-    dp_id, funnel_id, hashtags = row[h_map["dp_id"]], row[h_map["funnel_id"]], [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
     
     raw_data_col = h_map.get("raw_data")
     raw_data = row[raw_data_col] if raw_data_col is not None and len(row) > raw_data_col else ""
@@ -332,10 +367,59 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                         bm_name_final = "No BM matched"
                         bm_id_final = "No ID"
 
+    is_full_success = bm_id_final != "No ID" and f_id != ""
+    
+    sf_idx = h_map.get("sf", 6)
+    tags_idx = h_map.get("tags", 7)
+    
+    pfsf_raw = row[sf_idx] if len(row) > sf_idx and row[sf_idx] else "[]"
+    try:
+        pfsf_arr = json.loads(pfsf_raw)
+    except json.JSONDecodeError:
+        pfsf_arr = []
+        
+    sfarray = pfsf_arr
+    if is_full_success and len(prompts) > 8:
+        sf_prompt_raw = prompts[8].replace("XX", ld_main)
+        cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
+        cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
+        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
+        llm_calls += 1
+        flags_text = flags_obj.text
+        
+        in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
+        tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
+        if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
+        
+        merged_sf = merge_and_extract_json(flags_text, pfsf_arr)
+        if merged_sf is not None:
+            sfarray = merged_sf
+            
+    sf_val = json.dumps(sfarray) if sfarray else ""
+    
+    ht_existing = [t.strip() for t in row[tags_idx].split(",")] if len(row) > tags_idx and row[tags_idx] else []
+    ht_list = []
+    for h in ht_existing:
+        if h and h.lower() not in [x.lower() for x in ht_list]:
+            ht_list.append(h)
+            
+    ht_extracted = ""
+    ht_m = re.search(r"Hashtags?:\s*(.*?)(?=\n|$)", res_p1, re.IGNORECASE)
+    if ht_m:
+        ht_extracted = ht_m.group(1).strip()
+        for h in ht_extracted.split(","):
+            if h.strip() and h.strip().lower() not in [x.lower() for x in ht_list] and h.strip().lower() not in ["none", "n/a", "na", "-", ""]:
+                ht_list.append(h.strip())
+                
+    if "bu_llm_sd_ld" not in ht_list:
+        ht_list.append("bu_llm_sd_ld")
+    ht_val = ", ".join(ht_list)
+
     pipeline_logger.info(f"PROCESS SUCCESS: {domain} | BM: {bm_name_final}")
     return {
-        "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "hashtags": hashtags,
-        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_final, "bm_id": bm_id_final, "sf": "bu_llm_sd_ld, bu_Internal_SRprocess_TypeA", "feed_id": f_id,
+        "type": "success", "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]],
+        "hashtags": ht_val, "sf": sf_val,
+        "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_final, "bm_id": bm_id_final, "feed_id": f_id,
         "tokens": tokens, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
         "body_len": len(combined)
@@ -391,7 +475,7 @@ class TypeAPipeline:
             if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
                 # Shifted mapping (Type A style - Columns shifted right by 1)
                 h_map = {
-                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
+                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "sf": 6, "tags": 7,
                     "skip": 8, "scrap_stat": 9, "sd": 10, "ld1": 11, "ld2": 12, "feed_id": 20,
                     "r1": "J", "r2": "U", "r3": "Y", # Standard Ranges: J-U, Y-AA
                     "raw_data": 26 # Col AA
@@ -400,7 +484,7 @@ class TypeAPipeline:
             else:
                 # Standard mapping
                 h_map = {
-                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
+                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "sf": 5, "tags": 6,
                     "skip": 7, "scrap_stat": 8, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19,
                     "r1": "I", "r2": "T", "r3": "X", # Standard Ranges: I-T, X-Z
                     "raw_data": 26 # Col AA
@@ -519,9 +603,9 @@ class TypeAPipeline:
                             "bmr2": row[r1_idx + 7] if len(row) > r1_idx + 7 else "",
                             "bm_name": row[r1_idx + 8] if len(row) > r1_idx + 8 else "", 
                             "bm_id": row[r1_idx + 9] if len(row) > r1_idx + 9 else "", 
-                            "sf": row[r1_idx + 10] if len(row) > r1_idx + 10 else "", 
-                            "feed_id": row[r1_idx + 11] if len(row) > r1_idx + 11 else "",
-                            "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
+                            "feed_id": row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "",
+                            "sf": row[h_map["sf"]] if len(row) > h_map["sf"] else "",
+                            "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
                 else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)
@@ -537,7 +621,16 @@ class TypeAPipeline:
                     if is_success:
                         r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                         r3_end = "AA" if r3 == "Y" else "Z"
-                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
+                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], "", res["feed_id"]]]})
+                        
+                        c_sf = chr(ord('A') + h_map["sf"])
+                        c_tags = chr(ord('A') + h_map["tags"])
+                        if h_map["tags"] == h_map["sf"] + 1:
+                            await r_q.put({'range': f"{c_sf}{idx}:{c_tags}{idx}", 'values': [[res["sf"], res["hashtags"]]]})
+                        else:
+                            await r_q.put({'range': f"{c_sf}{idx}", 'values': [[res["sf"]]]})
+                            await r_q.put({'range': f"{c_tags}{idx}", 'values': [[res["hashtags"]]]})
+                            
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     else:
                         reason = res.get('reason', 'Failed')
@@ -556,9 +649,44 @@ class TypeAPipeline:
                         sd = res.get("sd") if is_success else None
                         ld = res.get("ld1") if is_success else None
                         if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
-                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
-                            tags = hashtags + ["bu_llm_sd_ld", "bu_Internal_SRprocess_TypeA"]
-                            payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
+                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
+                            
+                            special_flags_raw = row[h_map["sf"]] if len(row) > h_map["sf"] and row[h_map["sf"]] else "[]"
+                            try:
+                                sf_array = json.loads(special_flags_raw)
+                            except json.JSONDecodeError:
+                                sf_array = []
+                            
+                            if "bu_llm_sd_ld" not in hashtags:
+                                hashtags.append("bu_llm_sd_ld")
+                            if is_full_success and "bu_Internal_SRprocess_TypeA" not in hashtags:
+                                hashtags.append("bu_Internal_SRprocess_TypeA")
+                                
+                            payload = {
+                                "id": dp_id, 
+                                "description": {"value": ld}, 
+                                "shortDescription": {"value": sd}, 
+                                "keywords": {"value": {"HASHTAGS": hashtags}}, 
+                                "publishingDepth": {"value": "Pub 2 - Partial"}
+                            }
+                            if sf_array:
+                                payload["specialFlags"] = {"value": sf_array}
+                            
+                            try:
+                                eh_status, eh_res = await call_tracxn_api(
+                                    session, 
+                                    f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
+                                    tracxn_limiter, method="get", headers=HEADERS
+                                )
+                                if eh_status == 200 and isinstance(eh_res, list):
+                                    for item in eh_res:
+                                        a_name = item.get("attributeName")
+                                        if a_name in ("foundedYear", "companyLocation") and item.get("createdBy") == "publish.edits@tracxn.com":
+                                            payload[a_name] = {"value": None}
+                                            pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
+                            except Exception as eh_err:
+                                pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                                
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
                         return 200, None
                         
@@ -729,12 +857,12 @@ class TypeAPipeline:
                                     logging.error(f"CSV BACKUP ERR: {e}")
                                 logging.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
                 
-                time_since_flush = time.time() - last_flush
-                if updates and (len(updates) >= 10 or time_since_flush > 10 or (s + f) == total):
-                    await _flush_to_sheets()
-                else:
-                    current_completed = s + f
-                    self.report_progress(current_completed, total, s, f)
+            time_since_flush = time.time() - last_flush
+            if updates and (len(updates) >= 10 or time_since_flush > 10 or (s + f) == total):
+                await _flush_to_sheets()
+            else:
+                current_completed = s + f
+                self.report_progress(current_completed, total, s, f)
         except asyncio.CancelledError:
             logging.info("Sheet writer cancelled, flushing remaining updates...")
             if updates:

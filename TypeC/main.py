@@ -123,8 +123,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
-    raw_data_col = h_map.get("raw_data")
-    raw_data = row[raw_data_col] if raw_data_col is not None and len(row) > raw_data_col else ""
+    raw_data = row[17] if len(row) > 17 else ""
     
     if raw_data.strip():
         pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
@@ -239,29 +238,13 @@ class TypeCPipeline:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
         
-        # Determine mapping based on the first data row
-        if data_rows:
-            _, first_row = data_rows[0]
-            if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
-                # Shifted mapping
-                h_map = {
-                    "domain": 2, "dp_id": 3, "funnel_name": 4, "funnel_id": 5, "tags": 6, "company_name": 7,
-                    "skip": 8, "scrap_stat": 8, "sd": 9, "ld": 10, "feed_id": 11,
-                    "r1": "I", "r2": "N", "r3": "P", # Shifted: I-N, P-R
-                    "raw_data": 17 # Col R
-                }
-                pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
-            else:
-                # Standard mapping
-                h_map = {
-                    "domain": 1, "dp_id": 2, "funnel_name": 3, "funnel_id": 4, "tags": 5, "company_name": 6,
-                    "skip": 7, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 10,
-                    "r1": "H", "r2": "M", "r3": "O", # Standard: H-M, O-Q
-                    "raw_data": 17 # Col R
-                }
-                pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
-        else:
-            h_map = {}
+        h_map = {
+            "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
+            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
+        }
+        
+        all_rows = await ws.get_all_values()
+        data_rows = [r for r in all_rows[self.start_row-1:] if len(r) > 1 and r[1].strip()]
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
@@ -269,7 +252,7 @@ class TypeCPipeline:
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_all_values())}
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in data_rows:
+        for idx, row in enumerate(data_rows, start=self.start_row):
             await work_queue.put((idx, row))
 
         cache_manager = GeminiCacheManager(settings.TYPEC_GEMINI_API_KEY)
@@ -316,22 +299,17 @@ class TypeCPipeline:
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map, cache_manager):
         monitor = SystemHealthMonitor()
         import random
-        # Jitter start to prevent CPU storm
-        j_time = random.uniform(1.0, 5.0)
-        pipeline_logger.debug(f"WORKER: Jittering for {j_time:.1f}s...")
-        await asyncio.sleep(j_time)
+        await asyncio.sleep(random.uniform(1.0, 5.0))
         while True:
             idx, row = await w_q.get()
             try:
-                # Initial resource check before starting a new row
                 await monitor.wait_for_resources(logger=pipeline_logger, timeout=300)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})
                 if self.mode == "phase2":
                     sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
-                    r1_idx = ord(h_map["r1"]) - ord('A')
-                    scrap_stat = row[r1_idx] if len(row) > r1_idx else ""
+                    scrap_stat = row[7] if len(row) > 7 else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
                         res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
@@ -339,7 +317,7 @@ class TypeCPipeline:
                             "type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id,
                             "funnel_name": row[h_map["funnel_name"]] if len(row) > h_map["funnel_name"] else "", 
                             "company_name": row[h_map["company_name"]] if len(row) > h_map["company_name"] else "",
-                            "feed_id": row[r1_idx + 3] if len(row) > r1_idx + 3 else "",
+                            "feed_id": row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "",
                             "tags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -350,84 +328,26 @@ class TypeCPipeline:
                     await r_q.put({'type': 'tokens', 'in': res["tokens"]["in"], 'out': res["tokens"]["out"], 'think': res["tokens"].get("think", 0), 'rows': res.get("llm_rows", 0) if is_success else 0, 'calls': res.get("llm_calls", 0) if is_success else 0})
                 
                 if res["type"] == "success":
-                    r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                     if self.mode != "phase2":
-                        r3_end = "P" if r3 == "N" else "O" # wait, O:Q (3) or N:P (3)
-                        r2_letter = chr(ord(r1) + 2) # H->J, I->K
-                        await r_q.put({'range': f"{r1}{idx}:{r2_letter}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
-                        
-                        r3_end_letter = chr(ord(r3) + 2) # O->Q, N->P? No, N->P is index 13-15?
-                        # O is 14, Q is 16. (3 columns)
-                        # N is 13, P is 15. (3 columns)
-                        await r_q.put({'range': f"{r3}{idx}:{r3_end_letter}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
-                        
-                        if self.mode == "phase1":
+                        await r_q.put({'range': f"H{idx}:J{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"]]]})
+                        await r_q.put({'range': f"O{idx}:Q{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
+                        if self.mode in ("phase1", "full"):
                             funnel_name = res.get("funnel_name") or ""
                             feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
                             feed_id = f_ids.get(feed, "")
-                            k_col = chr(ord(r1) + 3)
-                            await r_q.put({'range': f"{k_col}{idx}", 'values': [[feed_id]]})
-                    
-                    if self.mode != "phase1":
-                        pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
-                        tags = res["tags"] + ["bu_llm_typec_autopublish"]
-                        funnel_name = res.get("funnel_name") or ""
-                        feed = funnel_name.split(" : ")[1] if " : " in funnel_name else funnel_name
-                        feed_id = f_ids.get(feed, "")
-                        
-                        # 1. Fetch edit history to detect publish.edits@tracxn.com edits for foundedYear & companyLocation
-                        data_map = {"foundedYear": "No", "companyLocation": "No"}
-                        try:
-                            eh_status, eh_res = await call_tracxn_api(
-                                session, 
-                                f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{res['dp_id']}", 
-                                tracxn_limiter, 
-                                method="get", 
-                                headers=HEADERS
-                            )
-                            if eh_status == 200 and isinstance(eh_res, list):
-                                for item in eh_res:
-                                    a_name = item.get("attributeName")
-                                    cred_by = item.get("createdBy")
-                                    if a_name in data_map:
-                                        data_map[a_name] = cred_by
-                        except Exception as eh_err:
-                            pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
-                        
-                        # 2. Build the domain-profile update payload with PUBLISHED status
-                        dp_payload = {
-                            "id": res["dp_id"],
-                            "companyName": {"value": res["company_name"]},
-                            "description": {"value": res["ld"]},
-                            "shortDescription": {"value": res["sd"]},
-                            "keywords": {"value": {"HASHTAGS": tags}},
-                            "publishingDepth": {"value": "Pub 2 - Partial"},
-                            "status": {"value": "PUBLISHED"}
-                        }
-                        
-                        # Apply Bot Cleanup: Clear if authored by publish.edits@tracxn.com
-                        if data_map.get("foundedYear") == "publish.edits@tracxn.com":
-                            dp_payload["foundedYear"] = {"value": None}
-                            pipeline_logger.info(f"BOT CLEANUP: Clearing foundedYear for {domain}")
-                        if data_map.get("companyLocation") == "publish.edits@tracxn.com":
+                            res["feed_id"] = feed_id
+                            await r_q.put({'range': f"K{idx}", 'values': [[feed_id]]})
+
                 is_success = res["type"] == "success"
                 is_full_success = is_success and res.get("feedcheck") == "Yes" and res.get("bm_id")
 
                 if self.mode != "phase2":
-                    if is_success:
-                        hash_stat = res.get("hash_status") or ("Yes" if res.get("hash_removed") else "No")
-                        r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
-                        r3_end = "X" if r3 == "V" else "W"
-                        
-                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
-                        await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
-                    else:
+                    if not is_success:
                         reason = res.get('reason', 'Failed')
                         if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                        stat_col = h_map["r1"]
-                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
+                        await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
 
                 if self.mode != "phase1" and (is_success or self.mode != "phase2"):
                     pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
@@ -435,24 +355,48 @@ class TypeCPipeline:
                     funnel_id = row[h_map["funnel_id"]]
                     
                     async def update_dp():
+                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                        if not feed_id:
+                            return 200, None
+                            
                         sd = res.get("sd") if is_success else None
                         ld = res.get("ld") if is_success else None
                         if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                             hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
-                            tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
-                            if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
-                            payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
+                            tags = hashtags + ["bu_llm_typec_autopublish"]
+                            payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
+                            
+                            company_name = res.get("company_name", "").strip()
+                            if company_name:
+                                payload["companyName"] = {"value": company_name}
+                                
+                            try:
+                                eh_status, eh_res = await call_tracxn_api(
+                                    session, 
+                                    f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
+                                    tracxn_limiter, method="get", headers=HEADERS
+                                )
+                                if eh_status == 200 and isinstance(eh_res, list):
+                                    for item in eh_res:
+                                        a_name = item.get("attributeName")
+                                        if a_name in ("foundedYear", "companyLocation") and item.get("createdBy") == "publish.edits@tracxn.com":
+                                            payload[a_name] = {"value": None}
+                                            pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
+                            except Exception as eh_err:
+                                pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                                
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=payload, headers=HEADERS)
                         return 200, None
                         
                     async def update_bm():
-                        f_id = res.get("feed_id") or f_ids.get(res.get("bm_name")) or f_ids.get(row[3] if len(row) > 3 else "")
-                        if is_full_success and f_id:
-                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": f_id, "status": "PUBLISHED", "businessModelId": res["bm_id"], "companyId": dp_id}, "opType": "Update"}, headers=HEADERS)
+                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                        if feed_id:
+                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": dp_id}, "opType": "Update"}, headers=HEADERS)
                         return 200, None
                         
                     async def update_funnel():
-                        f_id_to_move = "5dc5863a2799a51cc0ff30e2" if is_full_success else "64197f01a6dcff6572453ead"
+                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                        f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "591d37b884ae06633a652496"
                         As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                         if As in (200, 201):
                             ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -462,7 +406,7 @@ class TypeCPipeline:
                             return ms
                         return "Assign Failed"
                         
-                    (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                    (s1, _), (s_f, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
                     
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld") if is_success else None
@@ -471,24 +415,15 @@ class TypeCPipeline:
                     else:
                         sdld = "NotUpdated"
                         
-                    if is_full_success:
-                        bm = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
+                    feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                    if feed_id:
+                        f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
+                        fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                     else:
-                        bm = "NotUpdated"
-                        
-                    if ms in (200, 201):
-                        fun = "Sent Back to Discovery" if not is_full_success else "Done"
-                    else:
-                        fun = "Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err")
+                        f_stat = "N/A"
+                        fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                     
-                    if h_map["r1"] == "J":
-                        o_col, s_col = "P", "T"
-                    else:
-                        o_col, s_col = "O", "S"
-                    
-                    f_id = res.get("feed_id") or f_ids.get(res.get("bm_name")) or f_ids.get(row[3] if len(row) > 3 else "")
-                    hash_stat = res.get("hash_status") or ("Yes" if res.get("hash_removed") else "No") if is_success else "N/A"
-                    await r_q.put({'range': f"{o_col}{idx}:{s_col}{idx}", 'values': [[hash_stat, f_id, sdld, bm, fun]]})
+                    await r_q.put({'range': f"K{idx}:N{idx}", 'values': [[feed_id, sdld, f_stat, fun]]})
                     
                 await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
