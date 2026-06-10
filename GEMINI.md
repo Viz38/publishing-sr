@@ -38,6 +38,36 @@ Each engine operates via a two-phase architecture to isolate scraping/LLM proces
   - **LLM Call 4 (`prompts[7]`)**: 2nd Level BM Prediction (if 1st Level BM maps to deeper taxonomies).
   - **LLM Call 5 (`prompts[8]`)**: Executes only on full success (valid BM). Predicts Special Flags, parses them as a JSON array, and merges them with Pre-Filled Special Flags (PFSF) from Column G.
   - **Output**: Writes SD, LD, BM data, and the merged Special Flags JSON array back to the Google Sheet.
+
+**Type A Explicit Column Mapping (Shifted Layout):**
+- A (0): Date
+- B (1): [Empty/Type Indicator]
+- C (2): Domains
+- D (3): Domain Profile ID
+- E (4): Funnel Name
+- F (5): Funnel ID
+- G (6): HashTags (Input: supports 'bu_llm_sd_ld' override logic)
+- H (7): Current SF (Input: merges into LLM SF generation)
+- I (8): Input (No) to skip
+- J (9): Scrap Status
+- K (10): SD
+- L (11): LD P1
+- M (12): LD P2
+- N (13): BM Prompt 1
+- O (14): BM Resp 1
+- P (15): BM Prompt 2
+- Q (16): BM Resp 2
+- R (17): BM Name
+- S (18): BM ID
+- T (19): Output SF
+- U (20): FeedID
+- V (21): SDLD Update Status
+- W (22): Feed Status
+- X (23): Funnel Status
+- Y (24): Input Token
+- Z (25): Output Token
+- AA (26): Thinking Token
+- AB (27): Raw Data
 - **Phase 2: Tracxn API Push**
   - **Domain Profile (`update_dp`)**: Pushes SD, LD, and parsed Special Flags (`specialFlags: {"value": sfarray}`). Appends `bu_llm_sd_ld` to the Hashtags. If successful, strictly adds `bu_Internal_SRprocess_TypeA`.
   - **Business Model (`update_bm`)**: Maps the domain to the identified Theme ID and Business Model ID.
