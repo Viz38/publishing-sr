@@ -373,35 +373,45 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     tags_idx = h_map.get("tags", 7)
     
     pfsf_raw = row[sf_idx].strip() if len(row) > sf_idx and row[sf_idx] else ""
-    
-    if pfsf_raw and pfsf_raw != "[]":
-        sf_val = pfsf_raw
-    else:
-        sfarray = []
-        if is_full_success and len(prompts) > 8:
-            sf_prompt_raw = prompts[8].replace("XX", ld_main)
-            cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
-            cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
-            flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
-            llm_calls += 1
-            flags_text = flags_obj.text
-            
-            in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
-            tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
-            if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
-            
-            merged_sf = merge_and_extract_json(flags_text, [])
-            if merged_sf is not None:
-                sfarray = merged_sf
-                
-        sf_val = json.dumps(sfarray) if sfarray else ""
-    
+    try:
+        pfsf_arr = json.loads(pfsf_raw) if pfsf_raw and pfsf_raw != "[]" else []
+    except json.JSONDecodeError:
+        flags = [x.strip() for x in pfsf_raw.split(",") if x.strip()]
+        pfsf_arr = [{"specialFlagName": x} for x in flags]
+        
     ht_existing = [t.strip() for t in row[tags_idx].split(",")] if len(row) > tags_idx and row[tags_idx] else []
     ht_list = []
+    
+    user_added_sd_ld = False
     for h in ht_existing:
-        if h and h.lower() not in [x.lower() for x in ht_list]:
+        if h and h.lower() == "bu_llm_sd_ld":
+            user_added_sd_ld = True
+        elif h and h.lower() not in [x.lower() for x in ht_list]:
             ht_list.append(h)
             
+    if user_added_sd_ld:
+        if not any(isinstance(i, dict) and i.get("specialFlagName") == "bu_llm_sd_ld" for i in pfsf_arr):
+            pfsf_arr.append({"specialFlagName": "bu_llm_sd_ld"})
+
+    sfarray = pfsf_arr
+    if is_full_success and len(prompts) > 8:
+        sf_prompt_raw = prompts[8].replace("XX", ld_main)
+        cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
+        cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
+        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
+        llm_calls += 1
+        flags_text = flags_obj.text
+        
+        in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
+        tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
+        if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
+        
+        merged_sf = merge_and_extract_json(flags_text, pfsf_arr)
+        if merged_sf is not None:
+            sfarray = merged_sf
+            
+    sf_val = json.dumps(sfarray) if sfarray else ""
+
     ht_extracted = ""
     ht_m = re.search(r"Hashtags?:\s*(.*?)(?=\n|$)", res_p1, re.IGNORECASE)
     if ht_m:
@@ -410,7 +420,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             if h.strip() and h.strip().lower() not in [x.lower() for x in ht_list] and h.strip().lower() not in ["none", "n/a", "na", "-", ""]:
                 ht_list.append(h.strip())
                 
-    if "bu_llm_sd_ld" not in ht_list:
+    if not user_added_sd_ld and "bu_llm_sd_ld" not in ht_list:
         ht_list.append("bu_llm_sd_ld")
     ht_val = ", ".join(ht_list)
 
@@ -474,16 +484,16 @@ class TypeAPipeline:
             if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
                 # Shifted mapping (Type A style - Columns shifted right by 1)
                 h_map = {
-                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "sf": 6, "tags": 7,
+                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6, "sf": 7,
                     "skip": 8, "scrap_stat": 9, "sd": 10, "ld1": 11, "ld2": 12, "feed_id": 20,
                     "r1": "J", "r2": "U", "r3": "Y", # Standard Ranges: J-U, Y-AA
-                    "raw_data": 26 # Col AA
+                    "raw_data": 27 # Col AB
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
                 # Standard mapping
                 h_map = {
-                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "sf": 5, "tags": 6,
+                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5, "sf": 6,
                     "skip": 7, "scrap_stat": 8, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19,
                     "r1": "I", "r2": "T", "r3": "X", # Standard Ranges: I-T, X-Z
                     "raw_data": 26 # Col AA
@@ -620,15 +630,10 @@ class TypeAPipeline:
                     if is_success:
                         r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
                         r3_end = "AA" if r3 == "Y" else "Z"
-                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], "", res["feed_id"]]]})
+                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld1"], res["ld2"], res["bmp1"], res["bmr1"], res["bmp2"], res["bmr2"], res["bm_name"], res["bm_id"], res["sf"], res["feed_id"]]]})
                         
-                        c_sf = chr(ord('A') + h_map["sf"])
                         c_tags = chr(ord('A') + h_map["tags"])
-                        if h_map["tags"] == h_map["sf"] + 1:
-                            await r_q.put({'range': f"{c_sf}{idx}:{c_tags}{idx}", 'values': [[res["sf"], res["hashtags"]]]})
-                        else:
-                            await r_q.put({'range': f"{c_sf}{idx}", 'values': [[res["sf"]]]})
-                            await r_q.put({'range': f"{c_tags}{idx}", 'values': [[res["hashtags"]]]})
+                        await r_q.put({'range': f"{c_tags}{idx}", 'values': [[res["hashtags"]]]})
                             
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     else:
