@@ -80,6 +80,31 @@ Each engine operates via a two-phase architecture to isolate scraping/LLM proces
   - **LLM Call 1 (`prompts[0]`)**: Extracts Short Description and Long Description.
   - **LLM Call 2 (`prompts[3]`)**: Determines "FeedCheck" (Yes/No) and predicts a single Business Model mapping against the entire feed taxonomy.
   - **Output**: Writes SD, LD, FeedCheck, and BM data to Google Sheets.
+
+**Type B Explicit Column Mapping:**
+- A (0): Date
+- B (1): Domains
+- C (2): Domain Profile ID
+- D (3): Funnel Name
+- E (4): Funnel ID
+- F (5): HashTags
+- G (6): Input (No) to skip
+- H (7): Scrap Status
+- I (8): SD
+- J (9): LD
+- K (10): Relevant Feed
+- L (11): Explanation
+- M (12): BM
+- N (13): BMID
+- O (14): HashRemoval Status
+- P (15): FeedID
+- Q (16): SDLD Update Status
+- R (17): Feed Status
+- S (18): Funnel Status
+- T (19): Input Token
+- U (20): Output Token
+- V (21): Thinking Token
+- W (22): Raw Data
 - **Phase 2: Tracxn API Push**
   - **Domain Profile (`update_dp`)**: Pushes SD and LD. Appends `bu_llm_sd_ld` and `llmbasedpublishing`. If FeedCheck is 'Yes', adds `bu_llm_businessmodel_prediction`.
   - **Business Model (`update_bm`)**: If fully successful, updates the Theme Company Association.
@@ -91,6 +116,26 @@ Each engine operates via a two-phase architecture to isolate scraping/LLM proces
   - **Scraping**: Fetches the homepage only.
   - **LLM Call 1 (`prompts[0]`)**: Extracts Short Description and Long Description.
   - **Output**: Writes SD, LD, and tokens to Google Sheets.
+
+**Type C Explicit Column Mapping:**
+- A (0): Date
+- B (1): Domains
+- C (2): Domain Profile ID
+- D (3): Funnel Name
+- E (4): Funnel ID
+- F (5): HashTags
+- G (6): Company Name
+- H (7): Input (No) to skip
+- I (8): SD
+- J (9): LD
+- K (10): Feed ID
+- L (11): SDLD
+- M (12): Feed
+- N (13): Funnel
+- O (14): Input Token
+- P (15): Output Token
+- Q (16): Thinking Token
+- R (17): Raw Data
 - **Phase 2: Tracxn API Push**
   - **Domain Profile (`update_dp`)**: Pushes SD and LD. Appends `bu_llm_sd_ld` and `llmbasedpublishing` to Hashtags. No special flags or deep BMs are updated.
   - **Funnel Assignment (`update_funnel`)**: Executes standard funnel assignments.
