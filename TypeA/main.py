@@ -372,30 +372,29 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     sf_idx = h_map.get("sf", 6)
     tags_idx = h_map.get("tags", 7)
     
-    pfsf_raw = row[sf_idx] if len(row) > sf_idx and row[sf_idx] else "[]"
-    try:
-        pfsf_arr = json.loads(pfsf_raw)
-    except json.JSONDecodeError:
-        pfsf_arr = []
-        
-    sfarray = pfsf_arr
-    if is_full_success and len(prompts) > 8:
-        sf_prompt_raw = prompts[8].replace("XX", ld_main)
-        cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
-        cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
-        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
-        llm_calls += 1
-        flags_text = flags_obj.text
-        
-        in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
-        tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
-        if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
-        
-        merged_sf = merge_and_extract_json(flags_text, pfsf_arr)
-        if merged_sf is not None:
-            sfarray = merged_sf
+    pfsf_raw = row[sf_idx].strip() if len(row) > sf_idx and row[sf_idx] else ""
+    
+    if pfsf_raw and pfsf_raw != "[]":
+        sf_val = pfsf_raw
+    else:
+        sfarray = []
+        if is_full_success and len(prompts) > 8:
+            sf_prompt_raw = prompts[8].replace("XX", ld_main)
+            cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
+            cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
+            flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
+            llm_calls += 1
+            flags_text = flags_obj.text
             
-    sf_val = json.dumps(sfarray) if sfarray else ""
+            in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
+            tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
+            if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
+            
+            merged_sf = merge_and_extract_json(flags_text, [])
+            if merged_sf is not None:
+                sfarray = merged_sf
+                
+        sf_val = json.dumps(sfarray) if sfarray else ""
     
     ht_existing = [t.strip() for t in row[tags_idx].split(",")] if len(row) > tags_idx and row[tags_idx] else []
     ht_list = []
@@ -649,9 +648,17 @@ class TypeAPipeline:
                         sd = res.get("sd") if is_success else None
                         ld = res.get("ld1") if is_success else None
                         if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
-                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
+                            ht_val = res.get("hashtags")
+                            if ht_val is None:
+                                hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
+                            elif isinstance(ht_val, str):
+                                hashtags = [t.strip() for t in ht_val.split(",") if t.strip()]
+                            else:
+                                hashtags = list(ht_val)
                             
-                            special_flags_raw = row[h_map["sf"]] if len(row) > h_map["sf"] and row[h_map["sf"]] else "[]"
+                            special_flags_raw = res.get("sf")
+                            if not special_flags_raw:
+                                special_flags_raw = row[h_map["sf"]] if len(row) > h_map["sf"] and row[h_map["sf"]] else "[]"
                             try:
                                 sf_array = json.loads(special_flags_raw)
                             except json.JSONDecodeError:
@@ -825,7 +832,9 @@ class TypeAPipeline:
                     # Wait up to 1.0s for an item
                     item = await asyncio.wait_for(r_q.get(), timeout=1.0)
                 except asyncio.TimeoutError:
-                    pass
+                    if updates and time.time() - last_flush > 60:
+                        await _flush_to_sheets()
+                    continue
                 else:
                     # Process items from queue
                     items_to_process = [item]
@@ -857,12 +866,12 @@ class TypeAPipeline:
                                     logging.error(f"CSV BACKUP ERR: {e}")
                                 logging.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
                 
-            time_since_flush = time.time() - last_flush
-            if updates and (len(updates) >= 10 or time_since_flush > 10 or (s + f) == total):
-                await _flush_to_sheets()
-            else:
-                current_completed = s + f
-                self.report_progress(current_completed, total, s, f)
+                time_since_flush = time.time() - last_flush
+                if updates and (len(updates) >= 10 or time_since_flush > 10 or (s + f) == total):
+                    await _flush_to_sheets()
+                else:
+                    current_completed = s + f
+                    self.report_progress(current_completed, total, s, f)
         except asyncio.CancelledError:
             logging.info("Sheet writer cancelled, flushing remaining updates...")
             if updates:
