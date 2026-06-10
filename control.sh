@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ==========================================================
-# 🚀 SR PUBLISHING - PRODUCTION v6.7
+# 🚀 SR PUBLISHING - PRODUCTION v7.1
 # ==========================================================
 # Supports: macOS (Intel/Silicon) & Ubuntu
 # ==========================================================
@@ -687,7 +687,7 @@ EOF"
 while true; do
     clear
     echo -e "${BLUE}==========================================================${NC}"
-    echo -e "🚀  SR PUBLISHING - PRODUCTION v6.7  🚀"
+    echo -e "🚀  SR PUBLISHING - PRODUCTION v7.1  🚀"
     echo -e "👤  Identity: $IDENTITY | Python: ${PYTHON_CMD:-'NOT FOUND'} | OS: $OS"
     echo -e "${BLUE}==========================================================${NC}"
     check_status
