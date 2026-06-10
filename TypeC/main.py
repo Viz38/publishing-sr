@@ -363,7 +363,7 @@ class TypeCPipeline:
                         ld = res.get("ld") if is_success else None
                         if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                             hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
-                            tags = hashtags + ["bu_llm_typec_autopublish"]
+                            tags = hashtags + ["bu_llm_typec_autopublish", "bu_llm_sd_ld"]
                             payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
                             
                             company_name = res.get("company_name", "").strip()

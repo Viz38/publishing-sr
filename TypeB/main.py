@@ -427,7 +427,7 @@ class TypeBPipeline:
                         ld = res.get("ld") if is_success else None
                         if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                             hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
-                            tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
+                            tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing", "bu_Internal_SRprocess_TypeB"]
                             if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
                             payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
                             
