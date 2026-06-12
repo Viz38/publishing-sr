@@ -31,6 +31,7 @@ class MultiTierRateLimiter:
         self.limits = limits  # e.g. {'second': 100, 'minute': 1000, 'hour': 10000, 'day': 100000}
         self.lock = asyncio.Lock()
         self._windows = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400}
+        self.current_wait_sec = 0  # EXPOSED property for UI feedback
         # One deque per window tier storing timestamps
         from collections import deque
         self._deques = {name: deque() for name in limits if name in self._windows}
@@ -40,6 +41,7 @@ class MultiTierRateLimiter:
             while True:
                 now = time.time()
                 blocked = False
+                max_wait = 0
                 for window_name, limit in self.limits.items():
                     if window_name not in self._windows:
                         continue
@@ -51,14 +53,17 @@ class MultiTierRateLimiter:
                         dq.popleft()
                     if len(dq) >= limit:
                         blocked = True
-                        break
+                        wait_for_this_window = dq[0] - cutoff
+                        max_wait = max(max_wait, wait_for_this_window)
                 if not blocked:
+                    self.current_wait_sec = 0
                     # Record this request in all tracked windows
                     for dq in self._deques.values():
                         dq.append(now)
                     return
-                # Back off briefly and retry
-                await asyncio.sleep(0.05)
+                # Update exposed property and wait
+                self.current_wait_sec = max_wait
+                await asyncio.sleep(min(max_wait, 5.0))  # sleep up to 5s to stay responsive to UI checks
 
 class GoogleSheetsClient:
     _instance = None

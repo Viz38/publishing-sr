@@ -344,8 +344,9 @@ def extract_descriptions(text: str) -> Tuple[str, str]:
     # Check for AI refusal or insufficient data signals
     text_lower = text.lower()
     refusal_signals = ["i cannot", "not available", "no information", "insufficient data", "cannot provide", "don't have access", "does not contain"]
-    if any(sig in text_lower for sig in refusal_signals):
-        return "NO_DATA", "NO_DATA"
+    for sig in refusal_signals:
+        if sig in text_lower:
+            return f"REFUSAL: {sig}", f"REFUSAL: {sig}"
     
     # Check if LLM explicitly says it's parked
     if "parked" in text_lower and ("domain" in text_lower or "site" in text_lower or "page" in text_lower):

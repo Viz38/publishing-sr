@@ -132,7 +132,7 @@ async def get_status():
         pass
         
     return {
-        "status": state["status"],
+        "status": state["progress"].get("status", state["status"]),
         "active": state["status"] == "running",
         "progress_current": state["progress"].get("current", 0),
         "progress_total": state["progress"].get("total", 0),

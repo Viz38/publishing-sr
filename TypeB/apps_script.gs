@@ -175,7 +175,7 @@ function uiStartRun(resumeOnly = false) {
 
   htmlContent += 'function updateProgressUI(s){if(!s)return;const pct=s.progress_total>0?Math.round((s.progress_current/s.progress_total)*100):0;';
   htmlContent += 'document.getElementById("progress-fill").style.width=pct+"%";';
-  htmlContent += 'document.getElementById("status-text").textContent=s.active?"Processing rows...":"Pipeline Idle";';
+  htmlContent += 'document.getElementById("status-text").textContent=(s.active && s.status && s.status!=="running")?s.status:(s.active?"Processing rows...":"Pipeline Idle");';
   htmlContent += 'document.getElementById("count-text").textContent=s.progress_current+" / "+s.progress_total+" rows";';
   htmlContent += 'document.getElementById("yield-text").textContent=s.progress_success+" Successful";';
   htmlContent += 'document.getElementById("worker-info-progress").innerHTML="Worker: <strong>"+(s.workerName||"Unknown")+"</strong>";';

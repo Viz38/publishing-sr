@@ -173,6 +173,10 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     tokens = {"in": in_p, "out": out_p, "think": think_tokens}
     
     sd, ld = extract_descriptions(res)
+    if sd.startswith("REFUSAL:"):
+        reason = sd.replace("REFUSAL:", "").strip()
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: LLM Refused - {reason}")
+        return {"type": "error", "reason": f"LLM Refused - {reason}", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
         return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
@@ -345,7 +349,8 @@ class TypeCPipeline:
                     if not is_success:
                         reason = res.get('reason', 'Failed')
                         if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
-                            reason = "Unable To Scrap"
+                            if "LLM Refused" not in reason:
+                                reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
 
@@ -355,13 +360,9 @@ class TypeCPipeline:
                     funnel_id = row[h_map["funnel_id"]]
                     
                     async def update_dp():
-                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                        if not feed_id:
-                            return 200, None
-                            
                         sd = res.get("sd") if is_success else None
                         ld = res.get("ld") if is_success else None
-                        if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
+                        if sd and ld and not sd.startswith("REFUSAL:") and sd != "NO_DATA" and sd != "PARKED_LLM":
                             hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
                             tags = hashtags + ["bu_llm_typec_autopublish", "bu_llm_sd_ld"]
                             payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
@@ -565,7 +566,7 @@ class TypeCPipeline:
 
     def report_progress(self, curr, total, success, fail):
         try:
-            with open(".progress.json", "w") as f: json.dump({"current": curr, "total": total, "success": success, "fail": fail}, f)
+            with open(".progress.json", "w") as f: json.dump({"current": curr, "total": total, "success": success, "fail": fail, "status": f"Rate limit hit - waiting {int(tracxn_limiter.current_wait_sec//60)} mins" if tracxn_limiter.current_wait_sec > 60 else ("Rate limit hit - waiting <1 min" if tracxn_limiter.current_wait_sec > 0 else "running")}, f)
         except: pass
 
 async def main():

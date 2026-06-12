@@ -254,6 +254,10 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     tokens = {"in": in1, "out": out1, "think": think1}
     
     sd, ld1 = extract_descriptions(res_p1)
+    if sd.startswith("REFUSAL:"):
+        reason = sd.replace("REFUSAL:", "").strip()
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: LLM Refused - {reason}")
+        return {"type": "error", "reason": f"LLM Refused - {reason}", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
         return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
@@ -639,7 +643,8 @@ class TypeAPipeline:
                     else:
                         reason = res.get('reason', 'Failed')
                         if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
-                            reason = "Unable To Scrap"
+                            if "LLM Refused" not in reason:
+                                reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
                         await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
@@ -652,7 +657,7 @@ class TypeAPipeline:
                     async def update_dp():
                         sd = res.get("sd") if is_success else None
                         ld = res.get("ld1") if is_success else None
-                        if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
+                        if sd and ld and not sd.startswith("REFUSAL:") and sd != "NO_DATA" and sd != "PARKED_LLM":
                             ht_val = res.get("hashtags")
                             if ht_val is None:
                                 hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
@@ -885,7 +890,7 @@ class TypeAPipeline:
 
     def report_progress(self, curr, total, s, f):
         try:
-            with open(".progress.json", "w") as file: json.dump({"current": curr, "total": total, "success": s, "fail": f}, file)
+            with open(".progress.json", "w") as file: json.dump({"current": curr, "total": total, "success": s, "fail": f, "status": f"Rate limit hit - waiting {int(tracxn_limiter.current_wait_sec//60)} mins" if tracxn_limiter.current_wait_sec > 60 else ("Rate limit hit - waiting <1 min" if tracxn_limiter.current_wait_sec > 0 else "running")}, file)
         except: pass
 
 async def main():
