@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     SUPABASE_PORT: int = 6543
     SUPABASE_DB: str = "postgres"
     SUPABASE_USER: str = "postgres.fqccsacfdtnlnvlhcuec"
-    SUPABASE_PASSWORD: str = ""
+    SUPABASE_PASSWORD: str = "Tracxn@SR"
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
