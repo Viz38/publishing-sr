@@ -217,12 +217,24 @@ class GeminiCacheManager:
                 cache_name, _ = self.caches.pop(key)
                 logging.info(f"CACHE INVALIDATED: {key} ({cache_name})")
 
-async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None, cache_manager=None, cache_key: str = None) -> LLMResult:
+async def confirm_parked_via_llm(session: aiohttp.ClientSession, text: str, limiter, api_key: str = None) -> bool:
+    """
+    Tier 2 check: Ask Gemini to confirm if the page really looks like a parked domain.
+    """
+    snippet = text[:2000]
+    prompt = PARKED_LLM_PROMPT + snippet
+    result = await call_gemini_api(session, prompt, limiter, api_key=api_key)
+    if result.success and result.text:
+        return "yes" in result.text.lower()
+    return False
+
+async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, api_key: str = None, system_instruction: str = None, cached_content_name: str = None, cache_manager=None, cache_key: str = None) -> LLMResult:
     import random
     if not prompt or prompt == "noData":
         return LLMResult(text="Error", success=False)
     
-    url = f"{settings.GEMINI_API_URL}?key={settings.TYPEA_GEMINI_API_KEY}"
+    target_key = api_key or settings.TYPEA_GEMINI_API_KEY
+    url = f"{settings.GEMINI_API_URL}?key={target_key}"
     max_retries = 3
     
     payload = {"contents": [{"parts": [{"text": prompt}]}]}

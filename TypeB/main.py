@@ -19,12 +19,13 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.utils import (
-    call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, 
-    is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, 
-    GeminiCacheManager
+    call_gemini_api, call_tracxn_api, extract_descriptions, 
+    get_dynamic_max_workers, SystemHealthMonitor, 
+    GeminiCacheManager, clean_html, is_parked_domain
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher
+from sr_common.supabase_client import fetch_scraped_content
 from sr_common.stealth import get_browser_profile
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
@@ -119,8 +120,6 @@ async def save_snapshot(domain: str, html: str, reason: str):
     except Exception as e:
         scrap_logger.error(f"SNAPSHOT_ERR: Could not save snapshot: {e}")
 
-from urllib.parse import urlparse
-
 # Global fetcher instance
 fetcher = StealthFetcher()
 
@@ -135,28 +134,40 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
         final_url = f"https://{domain}"
         body = raw_data.strip()
+        scraper_used = "Manual"
     else:
-        html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+        # Tier 2: Tech Crawler — check Supabase
+        supabase_content = await fetch_scraped_content(domain)
+        if supabase_content:
+            body = supabase_content
+            scraper_used = "Tech Crawler"
+            pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(body)} chars)")
+        else:
+            # Tier 3: BU — run the built-in StealthFetcher
+            scraper_used = "BU"
+            pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
+            html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
 
-        if html is None:
-            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-            return {"type": "error", "reason": reason}
-        if len(html) < 300:
-            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
-            return {"type": "error", "reason": "Low Content"}
+            if html is None:
+                pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
+                return {"type": "error", "reason": reason, "scraper_used": scraper_used}
+            if len(html) < 300:
+                pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+                return {"type": "error", "reason": "Low Content", "scraper_used": scraper_used}
             
-        body = await clean_html(html)
-        pipeline_logger.info(f"PROCESS: Scraped {domain} | Length: {len(body)}")
-        
-        # Check for parked
-        parked, kw = is_parked_domain(html, body)
-        if parked:
-            pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
-            return {"type": "error", "reason": "Parked"}
+            body = clean_html(html)
+
+    pipeline_logger.info(f"PROCESS: Content ready for {domain} | Length: {len(body)} | Source: {scraper_used}")
+
+    # Check for parked (use body for both args — html may not exist for manual content)
+    parked, kw = is_parked_domain(body, body)
+    if parked:
+        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
+        return {"type": "error", "reason": "Parked", "scraper_used": scraper_used}
     
     if len(body) < 100: 
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Low content")
-        return {"type": "error", "reason": "Low content"}
+        return {"type": "error", "reason": "Low content", "scraper_used": scraper_used}
         
     llm_calls = 0
     llm_rows = 1
@@ -164,12 +175,12 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     parts_p1 = prompts[0].split("XX")
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
-        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body
+        user_p1 = parts_p1[0].strip() + "\n\n" + body[:20000]
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
+        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
     else:
-        p1 = prompts[0].replace("XX", body[:40000])
-        res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
+        p1 = prompts[0].replace("XX", body[:20000])
+        res_p1_obj = await call_gemini_api(session, p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
     
     llm_calls += 1
     res_p1 = res_p1_obj.text
@@ -203,10 +214,10 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             user_bm = "Company Description:\n" + ld
             cache_key = f"prompt_3_{feed.replace(' ', '_')}"
             cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm)
-            res_bm_obj = await call_gemini_api(session, user_bm, gemini_limiter, system_instruction=sys_bm, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
+            res_bm_obj = await call_gemini_api(session, user_bm, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_bm, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
         else:
             bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
-            res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter)
+            res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
             
         llm_calls += 1
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
@@ -219,13 +230,14 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 bm_name = next((r[1] for r in bm_paths[feed]["data"] if str(r[0]) == num.group(0)), "")
                 bm_id = bm_map.get(bm_name)
 
-    pipeline_logger.info(f"PROCESS SUCCESS: {domain} | FeedCheck: {f_chk} | BM: {bm_name}")
+    pipeline_logger.info(f"PROCESS SUCCESS: {domain} | FeedCheck: {f_chk} | BM: {bm_name} | Source: {scraper_used}")
     return {
         "type": "success", "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
         "sd": sd, "ld": ld[:40000], "bm_res": bm_res[:40000], "bm_name": bm_name, "bm_id": bm_id, "feedcheck": f_chk,
         "tokens": {"in": in1+in2, "out": out1+out2, "think": think1+think2}, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
-        "feed_id": f_id, "body_len": len(body)
+        "feed_id": f_id, "body_len": len(body), "scraper_used": scraper_used,
+        "raw_data": body if scraper_used == "Tech Crawler" else ""
     }
 
 class TypeBPipeline:
@@ -280,7 +292,9 @@ class TypeBPipeline:
                     "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
                     "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 21,
                     "r1": "J", "r2": "T", "r3": "U", # Shifted: J-T, U-W
-                    "raw_data": 22 # Col W
+                    "raw_data": 23, # Col X
+                    "raw_data_col": "X",
+                    "scraper_col": "Y"
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -289,7 +303,9 @@ class TypeBPipeline:
                     "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
                     "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15,
                     "r1": "H", "r2": "S", "r3": "T", # Standard: H-S, T-V
-                    "raw_data": 22 # Col W
+                    "raw_data": 22, # Col W
+                    "raw_data_col": "W",
+                    "scraper_col": "X"
                 }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:
@@ -409,6 +425,12 @@ class TypeBPipeline:
                         
                         await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
+                        
+                        scraper_col = h_map.get("scraper_col", "Y")
+                        raw_data_col = h_map.get("raw_data_col", "X")
+                        await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
+                        if res.get("scraper_used") == "Tech Crawler" and res.get("raw_data"):
+                            await r_q.put({'range': f"{raw_data_col}{idx}", 'values': [[res.get("raw_data")[:40000]]]})
                     else:
                         reason = res.get('reason', 'Failed')
                         if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
@@ -416,6 +438,9 @@ class TypeBPipeline:
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
                         await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
+                        
+                        scraper_col = h_map.get("scraper_col", "Y")
+                        await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
 
                 if self.mode != "phase1" and (is_success or self.mode != "phase2"):
                     pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")

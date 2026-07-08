@@ -18,12 +18,13 @@ from dotenv import load_dotenv
 
 from sr_common.config import settings
 from sr_common.utils import (
-    call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, 
-    is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor, 
+    call_gemini_api, call_tracxn_api, extract_descriptions, 
+    get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
-from sr_common.fetcher import StealthFetcher
+from sr_common.scraper import StealthFetcher, clean_html, is_parked_domain
+from sr_common.supabase_client import fetch_scraped_content
 from sr_common.stealth import get_browser_profile
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
@@ -176,47 +177,58 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     raw_data_col = h_map.get("raw_data")
     raw_data = row[raw_data_col] if raw_data_col is not None and len(row) > raw_data_col else ""
     
+    scraper_used = "Manual"
     if raw_data.strip():
         pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
         final_url = f"https://{domain}"
         combined = raw_data.strip()
     else:
-        html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
+        # Tier 2: Tech Crawler — check Supabase
+        supabase_content = await fetch_scraped_content(domain)
+        if supabase_content:
+            combined = supabase_content
+            scraper_used = "Tech Crawler"
+            pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(combined)} chars)")
+        else:
+            # Tier 3: BU — run the built-in StealthFetcher
+            scraper_used = "BU"
+            pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
+            html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
 
-        if html is None:
-            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
-            return {"type": "error", "reason": reason}
-        if len(html) < 300:
-            pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
-            return {"type": "error", "reason": "Low Content"}
-        
-        home_text = await clean_html(html)
-        parked, kw = is_parked_domain(html, home_text)
-        if parked:
-            pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
-            return {"type": "error", "reason": "Parked"}
-        
-        body_results = [home_text]
-        links = extract_links(html, final_url)
-        
-        target_urls = []
-        scraped_urls = {final_url}
-        for group in paths:
-            for p in group:
-                m = next((l for l in links if p in l and l not in scraped_urls), None)
-                if m: target_urls.append(m); scraped_urls.add(m); break
-        
-        if target_urls:
-            pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
-            res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
-            body_results = []
-            for r in res:
-                if r[0]:
-                    cleaned = await clean_html(r[0])
-                    body_results.append(cleaned)
-        
-        combined = "\n\n".join(body_results)
-    pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)}")
+            if html is None:
+                pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason}")
+                return {"type": "error", "reason": reason, "scraper_used": scraper_used}
+            if len(html) < 300:
+                pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
+                return {"type": "error", "reason": "Low Content", "scraper_used": scraper_used}
+            
+            home_text = await clean_html(html)
+            parked, kw = is_parked_domain(html, home_text)
+            if parked:
+                pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
+                return {"type": "error", "reason": "Parked", "scraper_used": scraper_used}
+            
+            body_results = [home_text]
+            links = extract_links(html, final_url)
+            
+            target_urls = []
+            scraped_urls = {final_url}
+            for group in paths:
+                for p in group:
+                    m = next((l for l in links if p in l and l not in scraped_urls), None)
+                    if m: target_urls.append(m); scraped_urls.add(m); break
+            
+            if target_urls:
+                pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
+                res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
+                body_results = []
+                for r in res:
+                    if r[0]:
+                        cleaned = await clean_html(r[0])
+                        body_results.append(cleaned)
+            
+            combined = "\n\n".join(body_results)
+    pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)} | Source: {scraper_used}")
     
     llm_calls = 0
     llm_rows = 1
@@ -256,13 +268,13 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     sd, ld1 = extract_descriptions(res_p1)
     if sd == "NO_DATA":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
-        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
     if sd == "PARKED_LLM":
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
-        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
     if not sd or not ld1:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
 
     if not p2_coro:
         p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
@@ -431,7 +443,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         "sd": sd, "ld1": ld1, "ld2": ld2, "bmp1": bm_p1[:40000], "bmr1": res_bm1[:40000], "bmp2": bm_p2[:40000], "bmr2": res_bm2[:40000], "bm_name": bm_name_final, "bm_id": bm_id_final, "feed_id": f_id,
         "tokens": tokens, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
-        "body_len": len(combined)
+        "body_len": len(combined),
+        "scraper_used": scraper_used,
+        "raw_data": combined if scraper_used == "Tech Crawler" else ""
     }
 
 class TypeAPipeline:
@@ -487,7 +501,9 @@ class TypeAPipeline:
                     "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6, "sf": 7,
                     "skip": 8, "scrap_stat": 9, "sd": 10, "ld1": 11, "ld2": 12, "feed_id": 20,
                     "r1": "J", "r2": "U", "r3": "Y", # Standard Ranges: J-U, Y-AA
-                    "raw_data": 27 # Col AB
+                    "raw_data": 27, # Col AB
+                    "raw_data_col": "AB",
+                    "scraper_col": "AC"
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -496,7 +512,9 @@ class TypeAPipeline:
                     "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5, "sf": 6,
                     "skip": 7, "scrap_stat": 8, "sd": 9, "ld1": 10, "ld2": 11, "feed_id": 19,
                     "r1": "I", "r2": "T", "r3": "X", # Standard Ranges: I-T, X-Z
-                    "raw_data": 26 # Col AA
+                    "raw_data": 26, # Col AA
+                    "raw_data_col": "AA",
+                    "scraper_col": "AB"
                 }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:
@@ -636,6 +654,12 @@ class TypeAPipeline:
                         await r_q.put({'range': f"{c_tags}{idx}", 'values': [[res["hashtags"]]]})
                             
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
+                        
+                        scraper_col = h_map.get("scraper_col", "AC")
+                        raw_data_col = h_map.get("raw_data_col", "AB")
+                        await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
+                        if res.get("scraper_used") == "Tech Crawler" and res.get("raw_data"):
+                            await r_q.put({'range': f"{raw_data_col}{idx}", 'values': [[res.get("raw_data")[:40000]]]})
                     else:
                         reason = res.get('reason', 'Failed')
                         if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):

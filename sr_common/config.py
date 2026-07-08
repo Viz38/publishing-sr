@@ -48,7 +48,7 @@ class Settings(BaseSettings):
     GEMINI_API_URL: str = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash:generateContent"
     GEMINI_CACHE_URL: str = "https://generativelanguage.googleapis.com/v1beta/cachedContents"
     MAX_PROMPT_SIZE: int = 40000
-    BATCH_SIZE: int = 50
+    BATCH_SIZE: int = 10
     REQUEST_TIMEOUT: int = 90
     MAX_RETRIES: int = 10
     RETRY_DELAY: int = 5
@@ -57,5 +57,20 @@ class Settings(BaseSettings):
     
     # Service Auth
     SERVICE_AUTH_TOKEN: str = ""
+
+    # Supabase (Tech Crawler data source for TypeB)
+    SUPABASE_HOST: str = "aws-0-ap-northeast-1.pooler.supabase.com"
+    SUPABASE_PORT: int = 6543
+    SUPABASE_DB: str = "postgres"
+    SUPABASE_USER: str = "postgres.fqccsacfdtnlnvlhcuec"
+    SUPABASE_PASSWORD: str = ""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        # Manually sync from environ if Pydantic missed them
+        for field in self.model_fields:
+            env_val = os.getenv(field)
+            if env_val and not getattr(self, field):
+                setattr(self, field, env_val)
 
 settings = Settings()
