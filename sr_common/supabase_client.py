@@ -40,6 +40,7 @@ async def _get_pool():
             logger.info("SUPABASE: Connection pool created successfully")
         except Exception as e:
             logger.error(f"SUPABASE: Failed to create connection pool — {e}")
+            print(f"SUPABASE ERROR CRITICAL: Failed to create connection pool — {e}")
             _pool = None
 
     return _pool
