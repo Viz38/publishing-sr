@@ -1,3 +1,7 @@
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import asyncio
 import aiohttp
 from camoufox.async_api import AsyncCamoufox
@@ -20,10 +24,10 @@ from sr_common.config import settings
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, extract_descriptions, 
     get_dynamic_max_workers, SystemHealthMonitor, 
-    GeminiCacheManager
+    GeminiCacheManager, clean_html, is_parked_domain
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
-from sr_common.scraper import StealthFetcher, clean_html, is_parked_domain
+from sr_common.fetcher import StealthFetcher
 from sr_common.supabase_client import fetch_scraped_content
 from sr_common.stealth import get_browser_profile
 
