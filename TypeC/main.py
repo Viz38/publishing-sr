@@ -160,7 +160,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-        res_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
+        res_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
     else:
         p1 = prompts[0].replace("XX", body[:40000])
         res_obj = await call_gemini_api(session, p1, gemini_limiter)
@@ -182,7 +182,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     return {
@@ -344,7 +344,7 @@ class TypeCPipeline:
                 if self.mode != "phase2":
                     if not is_success:
                         reason = res.get('reason', 'Failed')
-                        if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
+                        if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
@@ -396,7 +396,7 @@ class TypeCPipeline:
                         
                     async def update_funnel():
                         feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                        f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "591d37b884ae06633a652496"
+                        f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "64197f01a6dcff6572453ead"
                         As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                         if As in (200, 201):
                             ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -408,12 +408,27 @@ class TypeCPipeline:
                         
                     (s1, _), (s_f, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
                     
+                    fail_reason = res.get('reason', 'Failed') if not is_success else ''
+                    
+                    if is_success:
+                        not_updated_text = "NotUpdated"
+                    elif fail_reason in ("Low Content", "Low content"):
+                        not_updated_text = "Low Content"
+                    elif fail_reason == "Parked":
+                        not_updated_text = "Parked"
+                    elif fail_reason.startswith("Missing"):
+                        not_updated_text = "Irrelevant"
+                    elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
+                        not_updated_text = "NotUpdated"
+                    else:
+                        not_updated_text = "Irrelevant"
+                    
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                     else:
-                        sdld = "NotUpdated"
+                        sdld = not_updated_text
                         
                     feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
                     if feed_id:

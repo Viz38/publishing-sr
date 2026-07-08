@@ -226,7 +226,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined
         cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-        p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1)
+        p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1, cache_manager=cache_manager, cache_key="prompt_0")
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
     else:
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
@@ -238,7 +238,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
         user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
         cache_id2 = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
-        p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2)
+        p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_1")
     
     if p2_coro:
         res_p1_obj, res_p2_obj = await asyncio.gather(p1_coro, p2_coro)
@@ -262,7 +262,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     if not sd or not ld1:
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
 
     if not p2_coro:
         p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
@@ -289,7 +289,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         user_bm1 = "Company Description:\n" + ld_main
         cache_key = f"prompt_6_{f_id}"
         cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm1)
-        res_bm1_obj = await call_gemini_api(session, user_bm1, gemini_limiter, system_instruction=sys_bm1, cached_content_name=cache_id)
+        res_bm1_obj = await call_gemini_api(session, user_bm1, gemini_limiter, system_instruction=sys_bm1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
         bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1) # for logging
     else:
         bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
@@ -334,7 +334,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 user_bm2 = "Company Description:\n" + ld_main
                 cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
                 cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
-                res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id)
+                res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
                 bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
             else:
                 bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
@@ -398,7 +398,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         sf_prompt_raw = prompts[8].replace("XX", ld_main)
         cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
         cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
-        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf)
+        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf, cache_manager=cache_manager, cache_key="prompt_8")
         llm_calls += 1
         flags_text = flags_obj.text
         
@@ -638,7 +638,7 @@ class TypeAPipeline:
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     else:
                         reason = res.get('reason', 'Failed')
-                        if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
+                        if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
@@ -721,17 +721,32 @@ class TypeAPipeline:
                         
                     (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
                     
+                    fail_reason = res.get('reason', 'Failed') if not is_success else ''
+                    
+                    if is_success:
+                        not_updated_text = "NotUpdated"
+                    elif fail_reason in ("Low Content", "Low content"):
+                        not_updated_text = "Low Content"
+                    elif fail_reason == "Parked":
+                        not_updated_text = "Parked"
+                    elif fail_reason.startswith("Missing"):
+                        not_updated_text = "Irrelevant"
+                    elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
+                        not_updated_text = "NotUpdated"
+                    else:
+                        not_updated_text = "Irrelevant"
+                    
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld1") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         edits = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                     else:
-                        edits = "NotUpdated"
+                        edits = not_updated_text
                         
                     if is_full_success:
                         f_stat = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
                     else:
-                        f_stat = "NotUpdated"
+                        f_stat = not_updated_text
                         
                     if ms in (200, 201):
                         fun = "Sent Back to Discovery" if not is_full_success else "Done"
@@ -784,6 +799,7 @@ class TypeAPipeline:
                 for attempt in range(3):
                     try:
                         await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
+                        success = True
                         break
                     except asyncio.TimeoutError:
                         logging.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
@@ -824,8 +840,12 @@ class TypeAPipeline:
             except Exception as e:
                 logging.error(f"SHEET WRITER ERR: {e}")
             finally:
-                for _ in updates: r_q.task_done()
-                updates = []
+                if 'success' in locals() and success:
+                    for _ in updates: r_q.task_done()
+                    updates = []
+                else:
+                    logging.error(f"Keeping {len(updates)} updates in queue for next flush attempt.")
+                    
                 last_flush = time.time()
                 current_completed = s + f
                 self.report_progress(current_completed, total, s, f)

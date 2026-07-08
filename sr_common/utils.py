@@ -211,7 +211,13 @@ class GeminiCacheManager:
                 logging.warning(f"CACHE CREATE EXCEPTION for {key}: {e}. Falling back to non-cached request.")
                 return None
 
-async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None) -> LLMResult:
+    async def invalidate(self, key: str):
+        async with self.lock:
+            if key in self.caches:
+                cache_name, _ = self.caches.pop(key)
+                logging.info(f"CACHE INVALIDATED: {key} ({cache_name})")
+
+async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, system_instruction: str = None, cached_content_name: str = None, cache_manager=None, cache_key: str = None) -> LLMResult:
     import random
     if not prompt or prompt == "noData":
         return LLMResult(text="Error", success=False)
@@ -231,7 +237,12 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
         try:
             timeout = aiohttp.ClientTimeout(total=60)
             async with session.post(url, json=payload, timeout=timeout) as response:
-                res = await response.json()
+                try:
+                    res = await response.json()
+                    err_text = str(res)
+                except Exception:
+                    res = await response.text()
+                    err_text = res
                 
                 if response.status == 429:
                     base_delay = 2 ** (attempt + 1)
@@ -240,6 +251,17 @@ async def call_gemini_api(session: aiohttp.ClientSession, prompt: str, limiter, 
                     logging.warning(f"GEMINI 429: Rate limited. Backing off {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
                     await asyncio.sleep(wait_time)
                     continue
+                
+                if response.status in (403, 404) and "CachedContent not found" in err_text:
+                    if cache_manager and cache_key and system_instruction:
+                        logging.warning(f"GEMINI 403/404: CachedContent not found. Invalidating and recreating cache for {cache_key}")
+                        await cache_manager.invalidate(cache_key)
+                        new_cache_name = await cache_manager.get_or_create(session, cache_key, system_instruction)
+                        if new_cache_name:
+                            payload["cachedContent"] = new_cache_name
+                        elif "cachedContent" in payload:
+                            del payload["cachedContent"]
+                        continue
                 
                 if response.status != 200:
                     logging.error(f"GEMINI ERR {response.status}: {res} | Attempt {attempt + 1}/{max_retries}")

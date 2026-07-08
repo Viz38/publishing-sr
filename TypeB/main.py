@@ -166,7 +166,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + body
         cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
-        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id)
+        res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
     else:
         p1 = prompts[0].replace("XX", body[:40000])
         res_p1_obj = await call_gemini_api(session, p1, gemini_limiter)
@@ -188,7 +188,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     feed = row[h_map["feed"]].split(" : ")[1] if " : " in row[h_map["feed"]] else row[h_map["feed"]]
     f_id, f_def = f_ids.get(feed, ""), f_defs.get(feed, "")
@@ -203,7 +203,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             user_bm = "Company Description:\n" + ld
             cache_key = f"prompt_3_{feed.replace(' ', '_')}"
             cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm)
-            res_bm_obj = await call_gemini_api(session, user_bm, gemini_limiter, system_instruction=sys_bm, cached_content_name=cache_id)
+            res_bm_obj = await call_gemini_api(session, user_bm, gemini_limiter, system_instruction=sys_bm, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
         else:
             bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
             res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter)
@@ -411,7 +411,7 @@ class TypeBPipeline:
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
                     else:
                         reason = res.get('reason', 'Failed')
-                        if reason not in ("Low Content", "Low content", "Parked", "LLM failed", "Missing Phase 1 inputs"):
+                        if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
@@ -468,20 +468,35 @@ class TypeBPipeline:
                         
                     (s1, _), (s2, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
                     
+                    fail_reason = res.get('reason', 'Failed') if not is_success else ''
+                    
+                    if is_success:
+                        not_updated_text = "NotUpdated"
+                    elif fail_reason in ("Low Content", "Low content"):
+                        not_updated_text = "Low Content"
+                    elif fail_reason == "Parked":
+                        not_updated_text = "Parked"
+                    elif fail_reason.startswith("Missing"):
+                        not_updated_text = "Irrelevant"
+                    elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
+                        not_updated_text = "NotUpdated"
+                    else:
+                        not_updated_text = "Irrelevant"
+                    
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
                     else:
-                        sdld = "NotUpdated"
+                        sdld = not_updated_text
                         
                     if is_full_success:
                         bm = "Done" if s2 in (200, 201) else ("Duplicate/Already Moved" if s2 == 422 else ("Funnel State Conflicts" if s2 == 400 else str(s2)))
                     else:
-                        bm = "NotUpdated"
+                        bm = not_updated_text
                         
                     if ms in (200, 201):
-                        fun = "Sent Back to Discovery" if not is_full_success else "Done"
+                        fun = "Sent discovery" if not is_full_success else "Done"
                     else:
                         fun = "Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err")
                     
