@@ -155,7 +155,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: Low Content ({len(html)} chars)")
                 return {"type": "error", "reason": "Low Content", "scraper_used": scraper_used}
             
-            body = clean_html(html)
+            body = await clean_html(html)
 
     pipeline_logger.info(f"PROCESS: Content ready for {domain} | Length: {len(body)} | Source: {scraper_used}")
 
