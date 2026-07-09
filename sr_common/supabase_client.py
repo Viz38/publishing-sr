@@ -36,6 +36,7 @@ async def _get_pool():
                 max_size=5,
                 command_timeout=10,
                 ssl="require",
+                statement_cache_size=0,
             )
             logger.info("SUPABASE: Connection pool created successfully")
         except Exception as e:
