@@ -59,6 +59,11 @@ async def fetch_scraped_content(domain: str) -> Optional[str]:
             clean = clean[len(prefix):]
     clean = clean.rstrip("/")
 
+    if clean.startswith("www."):
+        alt_clean = clean[4:]
+    else:
+        alt_clean = f"www.{clean}"
+
     try:
         pool = await _get_pool()
         if pool is None:
@@ -67,8 +72,9 @@ async def fetch_scraped_content(domain: str) -> Optional[str]:
 
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT home_about_content FROM scraped_data WHERE domain = $1 LIMIT 1",
+                "SELECT home_about_content FROM scraped_data WHERE domain = $1 OR domain = $2 LIMIT 1",
                 clean,
+                alt_clean,
             )
 
         if row and row["home_about_content"] and row["home_about_content"].strip():
