@@ -23,7 +23,8 @@ from dotenv import load_dotenv
 from sr_common.config import settings
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, get_dynamic_max_workers, SystemHealthMonitor, 
-    GeminiCacheManager, clean_html, is_parked_domain
+    GeminiCacheManager, clean_html, is_parked_domain,
+    update_manual_curation_date
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher
@@ -531,11 +532,13 @@ class TypeCPipeline:
                             return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": dp_id}, "opType": "Update"}, headers=HEADERS)
                         return 200, None
                         
-                    async def update_funnel():
+                    async def update_funnel(feed_status):
                         feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
                         f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "64197f01a6dcff6572453ead"
                         As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                         if As in (200, 201):
+                            if f_id_to_move == "5dc586332799a51cc0ff2e36" and feed_status != 422:
+                                await update_manual_curation_date(session, dp_id, tracxn_limiter, HEADERS)
                             ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
                             if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
                                 ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -543,7 +546,8 @@ class TypeCPipeline:
                             return ms
                         return "Assign Failed"
                         
-                    (s1, _), (s_f, _), ms = await asyncio.gather(update_dp(), update_bm(), update_funnel())
+                    (s1, _), (s_f, _) = await asyncio.gather(update_dp(), update_bm())
+                    ms = await update_funnel(s_f)
                     
                     fail_reason = res.get('reason', 'Failed') if not is_success else ''
                     

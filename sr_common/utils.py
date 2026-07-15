@@ -482,6 +482,21 @@ def get_dynamic_max_workers(ram_per_worker_gb: float = 0.2) -> int:
     # Safe limit is the lowest of CPU or RAM capacity
     safe_limit = max(1, min(cpu_limit, ram_limit))
     
-    # Apply configurations
     calculated_limit = min(configured_max, safe_limit)
     return max(configured_min, calculated_limit)
+
+
+async def update_manual_curation_date(session: aiohttp.ClientSession, company_id: str, limiter, headers: dict) -> tuple:
+    """Updates the manual curation date of a company to today's date"""
+    from datetime import datetime
+    today = datetime.today()
+    payload = {
+        "id": company_id,
+        "manualCurationDate": {
+            "year": today.year,
+            "month": today.month,
+            "day": today.day
+        }
+    }
+    url = "https://platform.tracxn.com/data/entities/2.0/company"
+    return await call_tracxn_api(session, url, limiter, method="put", json_data=payload, headers=headers)
