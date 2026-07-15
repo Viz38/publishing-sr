@@ -127,6 +127,122 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
+class TrackingCacheManager(GeminiCacheManager):
+    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None):
+        super().__init__(api_key, max_size)
+        self.stats_filepath = stats_filepath or os.path.join(LOGS_DIR, "cache_stats.json")
+        self.stats = {
+            "created_count": 0,
+            "used_count": 0,
+            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
+        }
+        self.stats_lock = asyncio.Lock()
+        
+        # Write initial empty stats JSON on startup
+        try:
+            with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                json.dump({
+                    "summary": {"total_created": 0, "total_used": 0},
+                    "caches": []
+                }, f, indent=4)
+        except Exception:
+            pass
+
+    async def save_stats(self):
+        async with self.stats_lock:
+            now = time.time()
+            caches_list = []
+            
+            # Iterate through the caches we have tracked
+            for key, info in self.stats.get("caches", {}).items():
+                expiry = info.get("expiry", 0)
+                is_expired = now >= expiry
+                caches_list.append({
+                    "key": key,
+                    "cache_id": info.get("cache_name"),
+                    "created_at": info.get("created_at"),
+                    "used_count": info.get("hits", 0),
+                    "expiry_status": "expired" if is_expired else "live",
+                    "expiry_raw": expiry
+                })
+                
+            data_to_save = {
+                "summary": {
+                    "total_created": self.stats.get("created_count", 0),
+                    "total_used": self.stats.get("used_count", 0)
+                },
+                "caches": caches_list
+            }
+            try:
+                with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=4)
+            except Exception as e:
+                pipeline_logger.error(f"Error saving cache stats: {e}")
+
+    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        # Perform lazy sync if needed before checking already_existed
+        if not self._synced_remote:
+            async with self.lock:
+                if not self._synced_remote:
+                    await self.sync_remote_caches(session)
+
+        # Check if it was already valid in memory before this call
+        current_time = time.time()
+        already_existed = False
+        if key in self.caches:
+            cache_name, expiry = self.caches[key]
+            if cache_name and current_time < (expiry - 300):
+                already_existed = True
+
+        # Call the original method to get or create
+        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
+        
+        if cache_name:
+            async with self.stats_lock:
+                now = time.time()
+                ttl_seconds = int(ttl.replace("s", ""))
+                
+                caches_stats = self.stats.setdefault("caches", {})
+                info = caches_stats.get(key)
+                
+                # It is a new creation if it didn't exist in memory AND hasn't already been registered in this run
+                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
+                
+                if is_new_creation:
+                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
+                    caches_stats[key] = {
+                        "cache_name": cache_name,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "expiry": now + ttl_seconds,
+                        "hits": 0
+                    }
+                else:
+                    # It already existed, so this call reused it
+                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
+                    
+                    # Ensure we track it in the list for this run
+                    if key not in caches_stats:
+                        caches_stats[key] = {
+                            "cache_name": cache_name,
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "expiry": now + ttl_seconds,
+                            "hits": 0
+                        }
+                    caches_stats[key]["hits"] += 1
+            
+            await self.save_stats()
+            
+        return cache_name
+
+    async def invalidate(self, key: str):
+        await super().invalidate(key)
+        async with self.stats_lock:
+            caches_stats = self.stats.setdefault("caches", {})
+            if key in caches_stats:
+                caches_stats[key]["expiry"] = 0 # Force expired
+        await self.save_stats()
+
+
 async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
@@ -180,7 +296,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = parts_p1[0].strip() + "\n\n" + body[:20000]
-        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
         res_p1_obj = await call_gemini_api(session, user_p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
     else:
         p1 = prompts[0].replace("XX", body[:20000])
@@ -203,7 +319,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions"+res_p1, "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     feed = row[h_map["feed"]].split(" : ")[1] if " : " in row[h_map["feed"]] else row[h_map["feed"]]
     f_id, f_def = f_ids.get(feed, ""), f_defs.get(feed, "")
@@ -212,16 +328,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     bm_res, bm_name, bm_id, f_chk, in2, out2, think2 = "", "", None, "No", 0, 0, 0
     if feed in bm_paths:
         bm_paths_str = "\n".join([" ".join(map(str, r)) for r in bm_paths[feed]["data"]])
-        parts_bm = prompts[3].split("XX")
-        if len(parts_bm) == 2:
-            sys_bm = (parts_bm[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm[1].strip()).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
-            user_bm = "Company Description:\n" + ld
-            cache_key = f"prompt_3_{feed.replace(' ', '_')}"
-            cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm)
-            res_bm_obj = await call_gemini_api(session, user_bm, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_bm, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
-        else:
-            bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
-            res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
+        bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
+        res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
             
         llm_calls += 1
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
@@ -343,7 +451,7 @@ class TypeBPipeline:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 
-        cache_manager = GeminiCacheManager(settings.TYPEB_GEMINI_API_KEY)
+        cache_manager = TrackingCacheManager(settings.TYPEB_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]

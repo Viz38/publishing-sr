@@ -140,6 +140,53 @@ class GeminiCacheManager:
         self.caches: Dict[str, Tuple[str, float]] = {}
         self.lock = asyncio.Lock()
         self.max_size = max_size
+        self._synced_remote = False
+        self._last_sync_time = 0.0
+
+    async def sync_remote_caches(self, session: aiohttp.ClientSession):
+        """Fetches all active caches from Gemini and syncs self.caches"""
+        from datetime import datetime
+        now = time.time()
+        
+        # Cooldown check: don't query Google API more than once every 10 seconds
+        if now - self._last_sync_time < 10:
+            return
+            
+        try:
+            async with session.get(self.url, timeout=15) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    remote_list = data.get("cachedContents", [])
+                    
+                    # Clear in-memory caches to ensure we don't keep stale local entries
+                    # that no longer exist on Google Cloud.
+                    self.caches.clear()
+                    
+                    for item in remote_list:
+                        display_name = item.get("displayName")
+                        name = item.get("name")
+                        expire_time_str = item.get("expireTime")
+                        if display_name and name and expire_time_str:
+                            try:
+                                dt = datetime.fromisoformat(expire_time_str.replace('Z', '+00:00'))
+                                expiry = dt.timestamp()
+                                if expiry > now + 300: # 5 min safety buffer
+                                    key = None
+                                    if display_name == "SR_SD_LD_Prompt0":
+                                        key = "prompt_0"
+                                    elif display_name == "SR_SF_Prompt":
+                                        key = "prompt_8"
+                                    if key:
+                                        self.caches[key] = (name, expiry)
+                                        logger.info(f"CACHE SYNCED FROM GEMINI: {key} -> {name} (expires in {expiry - now:.0f}s)")
+                            except Exception as parse_err:
+                                logger.warning(f"Error parsing cache expireTime {expire_time_str}: {parse_err}")
+                    self._synced_remote = True
+                    self._last_sync_time = now
+                else:
+                    logger.warning(f"Failed to sync remote caches: {response.status}")
+        except Exception as e:
+            logger.warning(f"Exception during remote cache sync: {e}")
 
     async def _evict_oldest(self, session: aiohttp.ClientSession):
         if not self.caches:
@@ -163,14 +210,23 @@ class GeminiCacheManager:
     async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
         current_time = time.time()
         
-        # Fast path check
+        # 1. Fast path check: if we have it in memory and it's valid, return it immediately
         if key in self.caches:
             cache_name, expiry = self.caches[key]
             if cache_name and current_time < (expiry - 300): # 5 mins buffer
                 return cache_name
         
         async with self.lock:
-            # Recheck inside lock
+            # Recheck local cache in case a concurrent request already updated it
+            if key in self.caches:
+                cache_name, expiry = self.caches[key]
+                if cache_name and current_time < (expiry - 300):
+                    return cache_name
+            
+            # Sync from Gemini to see if another process/desktop has refreshed/created it
+            await self.sync_remote_caches(session)
+            
+            # Check again after sync
             if key in self.caches:
                 cache_name, expiry = self.caches[key]
                 if cache_name and current_time < (expiry - 300):
@@ -183,6 +239,12 @@ class GeminiCacheManager:
                 "systemInstruction": {"parts": [{"text": system_instruction}]},
                 "ttl": ttl
             }
+            
+            # Map prompt_0 to display name "SR_SD_LD_Prompt0" and prompt_8 to "SR_SF_Prompt"
+            if key == "prompt_0":
+                payload["displayName"] = "SR_SD_LD_Prompt0"
+            elif key == "prompt_8" or key.startswith("prompt_8_"):
+                payload["displayName"] = "SR_SF_Prompt"
             
             # LRU Eviction if at max capacity
             if len(self.caches) >= self.max_size and key not in self.caches:

@@ -121,6 +121,121 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
+class TrackingCacheManager(GeminiCacheManager):
+    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None):
+        super().__init__(api_key, max_size)
+        self.stats_filepath = stats_filepath or os.path.join(LOGS_DIR, "cache_stats.json")
+        self.stats = {
+            "created_count": 0,
+            "used_count": 0,
+            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
+        }
+        self.stats_lock = asyncio.Lock()
+        
+        # Write initial empty stats JSON on startup
+        try:
+            with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                json.dump({
+                    "summary": {"total_created": 0, "total_used": 0},
+                    "caches": []
+                }, f, indent=4)
+        except Exception:
+            pass
+
+    async def save_stats(self):
+        async with self.stats_lock:
+            now = time.time()
+            caches_list = []
+            
+            # Iterate through the caches we have tracked
+            for key, info in self.stats.get("caches", {}).items():
+                expiry = info.get("expiry", 0)
+                is_expired = now >= expiry
+                caches_list.append({
+                    "key": key,
+                    "cache_id": info.get("cache_name"),
+                    "created_at": info.get("created_at"),
+                    "used_count": info.get("hits", 0),
+                    "expiry_status": "expired" if is_expired else "live",
+                    "expiry_raw": expiry
+                })
+                
+            data_to_save = {
+                "summary": {
+                    "total_created": self.stats.get("created_count", 0),
+                    "total_used": self.stats.get("used_count", 0)
+                },
+                "caches": caches_list
+            }
+            try:
+                with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=4)
+            except Exception as e:
+                logging.error(f"Error saving cache stats: {e}")
+
+    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        # Perform lazy sync if needed before checking already_existed
+        if not self._synced_remote:
+            async with self.lock:
+                if not self._synced_remote:
+                    await self.sync_remote_caches(session)
+
+        # Check if it was already valid in memory before this call
+        current_time = time.time()
+        already_existed = False
+        if key in self.caches:
+            cache_name, expiry = self.caches[key]
+            if cache_name and current_time < (expiry - 300):
+                already_existed = True
+
+        # Call the original method to get or create
+        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
+        
+        if cache_name:
+            async with self.stats_lock:
+                now = time.time()
+                ttl_seconds = int(ttl.replace("s", ""))
+                
+                caches_stats = self.stats.setdefault("caches", {})
+                info = caches_stats.get(key)
+                
+                # It is a new creation if it didn't exist in memory AND hasn't already been registered in this run
+                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
+                
+                if is_new_creation:
+                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
+                    caches_stats[key] = {
+                        "cache_name": cache_name,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "expiry": now + ttl_seconds,
+                        "hits": 0
+                    }
+                else:
+                    # It already existed, so this call reused it
+                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
+                    
+                    # Ensure we track it in the list for this run
+                    if key not in caches_stats:
+                        caches_stats[key] = {
+                            "cache_name": cache_name,
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "expiry": now + ttl_seconds,
+                            "hits": 0
+                        }
+                    caches_stats[key]["hits"] += 1
+            
+            await self.save_stats()
+            
+        return cache_name
+
+    async def invalidate(self, key: str):
+        await super().invalidate(key)
+        async with self.stats_lock:
+            caches_stats = self.stats.setdefault("caches", {})
+            if key in caches_stats:
+                caches_stats[key]["expiry"] = 0 # Force expired
+        await self.save_stats()
+
 async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
@@ -168,11 +283,11 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     llm_calls = 0
     llm_rows = 1
     
-    if prompts[0].startswith("SYSTEM:"):
-        parts_p1 = prompts[0].split("XX")
-        sys_p1 = parts_p1[1].strip()
-        user_p1 = parts_p1[0].strip() + "\n\n" + body[:20000]
-        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+    parts_p1 = prompts[0].split("XX")
+    if len(parts_p1) == 2:
+        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+        user_p1 = "Raw Content:\n" + body[:20000]
+        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
         res_obj = await call_gemini_api(session, user_p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
     else:
         p1 = prompts[0].replace("XX", body[:20000])
@@ -269,7 +384,7 @@ class TypeCPipeline:
         for idx, row in enumerate(data_rows, start=self.start_row):
             await work_queue.put((idx, row))
 
-        cache_manager = GeminiCacheManager(settings.TYPEC_GEMINI_API_KEY)
+        cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]

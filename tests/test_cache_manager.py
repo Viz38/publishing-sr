@@ -106,3 +106,41 @@ async def test_cache_manager_evicts_closest_to_expiry():
     session.delete.assert_called_once()
     deleted_url = session.delete.call_args[0][0]
     assert "cachedContents/c1" in deleted_url
+
+@pytest.mark.asyncio
+async def test_cache_manager_remote_sync_and_display_name():
+    manager = GeminiCacheManager("dummy_key")
+    session = AsyncMock(spec=aiohttp.ClientSession)
+    
+    # Mock GET response (representing already existing caches on Google Cloud)
+    get_response = AsyncMock()
+    get_response.status = 200
+    
+    # 2 hours in the future
+    future_time_str = "2026-07-14T14:00:00Z"
+    
+    get_response.json = AsyncMock(return_value={
+        "cachedContents": [
+            {
+                "name": "cachedContents/remote-prompt-0",
+                "model": "models/gemini-1.5-flash-001",
+                "displayName": "SR_SD_LD_Prompt0",
+                "expireTime": future_time_str
+            }
+        ]
+    })
+    session.get.return_value.__aenter__.return_value = get_response
+    
+    # Real time mapping mock
+    from datetime import datetime
+    dt = datetime.fromisoformat(future_time_str.replace('Z', '+00:00'))
+    real_time = dt.timestamp() - 3600
+    
+    with patch('sr_common.utils.time.time', return_value=real_time):
+        cache_id = await manager.get_or_create(session, "prompt_0", "sys_instruct", ttl="3600s")
+    
+    # Ensure it reused the remote prompt-0 cache instead of creating a new one
+    assert cache_id == "cachedContents/remote-prompt-0"
+    assert "prompt_0" in manager.caches
+    assert session.get.call_count == 1
+    assert session.post.call_count == 0 # Succeeded by reusing, didn't call post!

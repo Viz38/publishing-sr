@@ -126,6 +126,122 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
+class TrackingCacheManager(GeminiCacheManager):
+    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None):
+        super().__init__(api_key, max_size)
+        self.stats_filepath = stats_filepath or os.path.join(LOGS_DIR, "cache_stats.json")
+        self.stats = {
+            "created_count": 0,
+            "used_count": 0,
+            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
+        }
+        self.stats_lock = asyncio.Lock()
+        
+        # Write initial empty stats JSON on startup
+        try:
+            with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                json.dump({
+                    "summary": {"total_created": 0, "total_used": 0},
+                    "caches": []
+                }, f, indent=4)
+        except Exception:
+            pass
+
+    async def save_stats(self):
+        async with self.stats_lock:
+            now = time.time()
+            caches_list = []
+            
+            # Iterate through the caches we have tracked
+            for key, info in self.stats.get("caches", {}).items():
+                expiry = info.get("expiry", 0)
+                is_expired = now >= expiry
+                caches_list.append({
+                    "key": key,
+                    "cache_id": info.get("cache_name"),
+                    "created_at": info.get("created_at"),
+                    "used_count": info.get("hits", 0),
+                    "expiry_status": "expired" if is_expired else "live",
+                    "expiry_raw": expiry
+                })
+                
+            data_to_save = {
+                "summary": {
+                    "total_created": self.stats.get("created_count", 0),
+                    "total_used": self.stats.get("used_count", 0)
+                },
+                "caches": caches_list
+            }
+            try:
+                with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=4)
+            except Exception as e:
+                logging.error(f"Error saving cache stats: {e}")
+
+    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        # Perform lazy sync if needed before checking already_existed
+        if not self._synced_remote:
+            async with self.lock:
+                if not self._synced_remote:
+                    await self.sync_remote_caches(session)
+
+        # Check if it was already valid in memory before this call
+        current_time = time.time()
+        already_existed = False
+        if key in self.caches:
+            cache_name, expiry = self.caches[key]
+            if cache_name and current_time < (expiry - 300):
+                already_existed = True
+
+        # Call the original method to get or create
+        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
+        
+        if cache_name:
+            async with self.stats_lock:
+                now = time.time()
+                ttl_seconds = int(ttl.replace("s", ""))
+                
+                caches_stats = self.stats.setdefault("caches", {})
+                info = caches_stats.get(key)
+                
+                # It is a new creation if it didn't exist in memory AND hasn't already been registered in this run
+                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
+                
+                if is_new_creation:
+                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
+                    caches_stats[key] = {
+                        "cache_name": cache_name,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "expiry": now + ttl_seconds,
+                        "hits": 0
+                    }
+                else:
+                    # It already existed, so this call reused it
+                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
+                    
+                    # Ensure we track it in the list for this run
+                    if key not in caches_stats:
+                        caches_stats[key] = {
+                            "cache_name": cache_name,
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "expiry": now + ttl_seconds,
+                            "hits": 0
+                        }
+                    caches_stats[key]["hits"] += 1
+            
+            await self.save_stats()
+            
+        return cache_name
+
+    async def invalidate(self, key: str):
+        await super().invalidate(key)
+        async with self.stats_lock:
+            caches_stats = self.stats.setdefault("caches", {})
+            if key in caches_stats:
+                caches_stats[key]["expiry"] = 0 # Force expired
+        await self.save_stats()
+
+
 def extract_links(html: str, base_url: str) -> Set[str]:
     if not html: return set()
     soup = BeautifulSoup(html, 'lxml')
@@ -241,7 +357,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined
-        cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1)
+        cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
         p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1, cache_manager=cache_manager, cache_key="prompt_0")
         bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
     else:
@@ -253,7 +369,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     if len(parts_p2) == 2:
         sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
         user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
-        cache_id2 = await cache_manager.get_or_create(session, "prompt_1", sys_p2)
+        cache_id2 = await cache_manager.get_or_create(session, "prompt_1", sys_p2, ttl="86400s")
         p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_1")
     
     if p2_coro:
@@ -299,17 +415,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     # BM Logic
     pipeline_logger.info(f"PROCESS: Running BM prediction for {domain}")
     bm_paths_str_1 = "\n".join([f"{r[0]}. {r[1]} - {r[2]}" for r in bm_mapping.get(feed, {}).get("1stLevel", [])])
-    parts_bm1 = prompts[6].split("Company Description:\nYY")
-    if len(parts_bm1) == 2:
-        sys_bm1 = (parts_bm1[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm1[1].strip()).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
-        user_bm1 = "Company Description:\n" + ld_main
-        cache_key = f"prompt_6_{f_id}"
-        cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm1)
-        res_bm1_obj = await call_gemini_api(session, user_bm1, gemini_limiter, system_instruction=sys_bm1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
-        bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1) # for logging
-    else:
-        bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
-        res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
+    bm_p1 = prompts[6].replace("YY", ld_main).replace("XX", f_def).replace("BM_Paths", bm_paths_str_1)
+    res_bm1_obj = await call_gemini_api(session, bm_p1, gemini_limiter)
     
     llm_calls += 1
     res_bm1 = res_bm1_obj.text
@@ -344,17 +451,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         filt = [s for s in f_bms2 if s[2].lower().startswith(bm_name_1.lower())]
         if filt:
             bm_paths_str_2 = "\n".join([" ".join(map(str, r)) for r in filt])
-            parts_bm2 = prompts[7].split("Company Description:\nXX")
-            if len(parts_bm2) == 2:
-                sys_bm2 = (parts_bm2[0].strip() + "\n\n[COMPANY DESCRIPTION PROVIDED BY USER BELOW]\n\n" + parts_bm2[1].strip()).replace("BM_Paths", bm_paths_str_2)
-                user_bm2 = "Company Description:\n" + ld_main
-                cache_key = f"prompt_7_{bm_name_1.replace(' ', '_')}"
-                cache_id = await cache_manager.get_or_create(session, cache_key, sys_bm2)
-                res_bm2_obj = await call_gemini_api(session, user_bm2, gemini_limiter, system_instruction=sys_bm2, cached_content_name=cache_id, cache_manager=cache_manager, cache_key=cache_key)
-                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
-            else:
-                bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
-                res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
+            bm_p2 = prompts[7].replace("XX", ld_main).replace("BM_Paths", bm_paths_str_2)
+            res_bm2_obj = await call_gemini_api(session, bm_p2, gemini_limiter)
             
             llm_calls += 1
             res_bm2 = res_bm2_obj.text
@@ -411,10 +509,15 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
 
     sfarray = pfsf_arr
     if is_full_success and len(prompts) > 8:
-        sf_prompt_raw = prompts[8].replace("XX", ld_main)
-        cache_key_sf = f"prompt_8_{domain.replace('.', '_')}"
-        cache_id_sf = await cache_manager.get_or_create(session, cache_key_sf, sf_prompt_raw)
-        flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, cached_content_name=cache_id_sf, cache_manager=cache_manager, cache_key="prompt_8")
+        parts_sf = prompts[8].split("XX")
+        if len(parts_sf) == 2:
+            sys_sf = parts_sf[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_sf[1].strip()
+            user_sf = parts_sf[0].strip() + "\n\n" + ld_main
+            cache_id_sf = await cache_manager.get_or_create(session, "prompt_8", sys_sf, ttl="86400s")
+            flags_obj = await call_gemini_api(session, user_sf, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_sf, cached_content_name=cache_id_sf, cache_manager=cache_manager, cache_key="prompt_8")
+        else:
+            sf_prompt_raw = prompts[8].replace("XX", ld_main)
+            flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
         llm_calls += 1
         flags_text = flags_obj.text
         
@@ -565,7 +668,7 @@ class TypeAPipeline:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 
-        cache_manager = GeminiCacheManager(settings.TYPEA_GEMINI_API_KEY)
+        cache_manager = TrackingCacheManager(settings.TYPEA_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, paths, f_ids, bm_mapping, f_defs, bm_ids, bm_1st_stat, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
