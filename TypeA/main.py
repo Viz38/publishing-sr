@@ -427,15 +427,12 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     tokens["in"] += in3; tokens["out"] += out3; tokens["think"] += think3
     
     bm_name_1 = "No Results"
-    if res_bm1.strip().startswith(("No Results", "No results")):
-        bm_name_1 = "No Results"
-    else:
-        pattern = r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation'
-        m = re.search(pattern, res_bm1, re.MULTILINE)
+    if not res_bm1.strip().lower().startswith(("no results", "no_results", "no result")):
+        serial_to_bm_1 = {int(r[0]): r[1] for r in bm_mapping.get(feed, {}).get("1stLevel", [])}
+        m = re.search(r'\b\d+\b', res_bm1)
         if m:
-            bm_name_1 = m.group(1).strip()
-        else:
-            bm_name_1 = "No Results"
+            serial_num_1 = int(m.group(0))
+            bm_name_1 = serial_to_bm_1.get(serial_num_1, "No Results")
     
     bm_name_final, bm_id_final = "No BM matched", "No ID"
     bm_p2, res_bm2 = "", ""
@@ -461,7 +458,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             in4, out4, think4 = res_bm2_obj.prompt_tokens, res_bm2_obj.candidate_tokens, res_bm2_obj.thinking_tokens
             if res_bm2_obj.thinking_text: think_text += f"BM2:\n{res_bm2_obj.thinking_text}\n"
             tokens["in"] += in4; tokens["out"] += out4; tokens["think"] += think4
-            if res_bm2.strip().startswith(("No Results", "No results")):
+            if res_bm2.strip().lower().startswith(("no results", "no_results", "no result")):
                 if bm_1st_stat.get(bm_name_1) == "Live":
                     bm_name_final = bm_name_1
                     bm_id_final = bm_ids.get(bm_name_1, "No ID")
@@ -469,11 +466,20 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                     bm_name_final = "No BM matched"
                     bm_id_final = "No ID"
             else:
-                pattern = r'^\d+[\.\s]+\s*(.*?)\s*[,:-]\s*Explanation'
-                m2 = re.search(pattern, res_bm2, re.MULTILINE)
+                serial_to_bm_2 = {int(s[0]): s[2] for s in filt}
+                m2 = re.search(r'\b\d+\b', res_bm2)
                 if m2:
-                    bm_name_final = m2.group(1).strip()
-                    bm_id_final = bm_ids.get(bm_name_final, "No ID")
+                    serial_num_2 = int(m2.group(0))
+                    bm_name_final = serial_to_bm_2.get(serial_num_2, "No BM matched")
+                    if bm_name_final != "No BM matched":
+                        bm_id_final = bm_ids.get(bm_name_final, "No ID")
+                    else:
+                        if bm_1st_stat.get(bm_name_1) == "Live":
+                            bm_name_final = bm_name_1
+                            bm_id_final = bm_ids.get(bm_name_1, "No ID")
+                        else:
+                            bm_name_final = "No BM matched"
+                            bm_id_final = "No ID"
                 else:
                     if bm_1st_stat.get(bm_name_1) == "Live":
                         bm_name_final = bm_name_1
@@ -504,11 +510,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         elif h and h.lower() not in [x.lower() for x in ht_list]:
             ht_list.append(h)
             
-    if user_added_sd_ld:
-        if not any(isinstance(i, dict) and i.get("specialFlagName") == "bu_llm_sd_ld" for i in pfsf_arr):
-            pfsf_arr.append({"specialFlagName": "bu_llm_sd_ld"})
-
-    sfarray = pfsf_arr
+    sfarray =[]
     if is_full_success and len(prompts) > 8:
         parts_sf = prompts[8].split("XX")
         if len(parts_sf) == 2:
@@ -635,17 +637,38 @@ class TypeAPipeline:
         
         bm_mapping, bm_ids, bm_1st_stat = {}, {}, {}
         for r in f_lvl[1:]:
-            if len(r) < 5: continue
-            f, p, bid, stat, desc = r[0].strip(), r[1].strip(), r[2].strip(), r[3].strip(), r[4].strip()
+            r = [x.strip() for x in r]
+            if len(r) < 6:
+                r.extend([""] * (6 - len(r)))
+            f, p, bid = r[0], r[1], r[2]
+            stat = r[5]
+            
+            desc_val_4 = r[4]
+            desc_val_3 = r[3]
+            if not desc_val_4 or desc_val_4.lower() in ("-", "null", "none", "empty"):
+                desc = desc_val_3
+            else:
+                desc = desc_val_4
+                
             bm_ids[p], bm_1st_stat[p] = bid, stat
             if f not in bm_mapping: bm_mapping[f] = {"1stLevel":[], "2ndLevel":[]}
             bm_mapping[f]["1stLevel"].append([len(bm_mapping[f]["1stLevel"])+1, p, desc])
         for r in s_lvl[1:]:
-            if len(r) < 4: continue
-            f, p, bid, desc = r[0].strip(), r[1].strip(), r[2].strip(), r[3].strip()
+            r = [x.strip() for x in r]
+            if len(r) < 5:
+                r.extend([""] * (5 - len(r)))
+            f, p, bid = r[0], r[1], r[2]
+            
+            desc_val_4 = r[4]
+            desc_val_3 = r[3]
+            if not desc_val_4 or desc_val_4.lower() in ("-", "null", "none", "empty"):
+                desc = desc_val_3
+            else:
+                desc = desc_val_4
+                
             bm_ids[p] = bid
             if f not in bm_mapping: bm_mapping[f] = {"1stLevel":[], "2ndLevel":[]}
-            bm_mapping[f]["2ndLevel"].append([len(bm_mapping[f]["2ndLevel"])+1, ".", p, " -"+desc])
+            bm_mapping[f]["2ndLevel"].append([len(bm_mapping[f]["2ndLevel"])+1, ".", p, " - " + desc])
  
         pipeline_logger.info("Connecting to Prompts & Feed Owner sheets...")
         prompts = [r[1] for r in (await (await (await gc.open_by_key(CONFIG["PROMPTS_SHEET_ID"])).worksheet("Prompts")).get_all_values())[1:10]]
@@ -858,16 +881,14 @@ class TypeAPipeline:
                     
                     fail_reason = res.get('reason', 'Failed') if not is_success else ''
                     
-                    if is_success:
-                        not_updated_text = "NotUpdated"
-                    elif fail_reason in ("Low Content", "Low content"):
+                    if fail_reason in ("Low Content", "Low content"):
                         not_updated_text = "Low Content"
                     elif fail_reason == "Parked":
                         not_updated_text = "Parked"
                     elif fail_reason.startswith("Missing"):
                         not_updated_text = "Irrelevant"
                     elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
-                        not_updated_text = "NotUpdated"
+                        not_updated_text = "NoWebscrap"
                     else:
                         not_updated_text = "Irrelevant"
                     

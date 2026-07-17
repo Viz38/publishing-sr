@@ -441,7 +441,11 @@ class TypeCPipeline:
                     sd, ld, dp_id, funnel_id = row[h_map["sd"]], row[h_map["ld"]], row[h_map["dp_id"]], row[h_map["funnel_id"]]
                     scrap_stat = row[7] if len(row) > 7 else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
-                        res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
+                        existing_reason = scrap_stat.strip()
+                        if existing_reason and not existing_reason.startswith("Yes"):
+                            res = {"type": "failed", "reason": existing_reason}
+                        else:
+                            res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
                         res = {
                             "type": "success", "sd": sd, "ld": ld, "dp_id": dp_id, "funnel_id": funnel_id,
@@ -487,7 +491,7 @@ class TypeCPipeline:
                         scraper_used = res.get("scraper_used", "BU")
                         await r_q.put({'range': f"S{idx}", 'values': [[scraper_used]]})
 
-                if self.mode != "phase1" and (is_success or self.mode != "phase2"):
+                if self.mode != "phase1":
                     pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
                     dp_id = row[h_map["dp_id"]]
                     funnel_id = row[h_map["funnel_id"]]

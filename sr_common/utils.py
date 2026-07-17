@@ -447,13 +447,13 @@ def extract_descriptions(text: str) -> Tuple[str, str]:
     if "parked" in text_lower and ("domain" in text_lower or "site" in text_lower or "page" in text_lower):
         return "PARKED_LLM", "PARKED_LLM"
 
-    json_sd = re.search(r'["\']Short Description["\']:\s*["\'](.*?)["\']', text, re.DOTALL)
-    json_ld = re.search(r'["\']Long Description["\']:\s*["\'](.*?)["\']', text, re.DOTALL)
+    json_sd = re.search(r'["\']\*?\*?(?:Short Description|SD)\*?\*?["\']:\s*["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
+    json_ld = re.search(r'["\']\*?\*?(?:Long Description|LD)\*?\*?["\']:\s*["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
     if json_sd and json_ld:
         sd, ld = json_sd.group(1).strip(), json_ld.group(1).strip()
     else:
-        sd_m = re.search(r"Short Description:\s*(.*?)(?=\nLong Description:|\n\n|$)", text, re.DOTALL)
-        ld_m = re.search(r"Long Description:\s*(.*)", text, re.DOTALL)
+        sd_m = re.search(r'\*?\*?(?:Short Description|SD)\*?\*?:\s*(.*?)(?=\n\*?\*?(?:Long Description|LD)\*?\*?:|\n\n|$)', text, re.IGNORECASE | re.DOTALL)
+        ld_m = re.search(r'\*?\*?(?:Long Description|LD)\*?\*?:\s*(.*)', text, re.IGNORECASE | re.DOTALL)
         sd, ld = (sd_m.group(1).strip() if sd_m else ""), (ld_m.group(1).strip() if ld_m else "")
         
     return " ".join(sd.split()).rstrip('.'), " ".join(ld.split())

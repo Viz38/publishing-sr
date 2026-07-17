@@ -335,13 +335,21 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         llm_calls += 1
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
         if res_bm_obj.thinking_text: think_text += f"BM:\n{res_bm_obj.thinking_text}\n"
-        m = re.search(r'^(?:FeedOutput:\s*)?(Yes|No)', bm_res, re.I | re.M)
-        f_chk = m.group(1).capitalize() if m else "No"
-        if f_chk == "Yes":
-            num = re.search(r"\d+", bm_res)
-            if num:
-                bm_name = next((r[1] for r in bm_paths[feed]["data"] if str(r[0]) == num.group(0)), "")
-                bm_id = bm_map.get(bm_name)
+        if bm_res.strip().lower().startswith(("no results", "no_results", "no result", "no")):
+            f_chk = "No"
+        else:
+            m = re.search(r'\b\d+\b', bm_res)
+            if m:
+                f_chk = "Yes"
+                serial_num = int(m.group(0))
+                serial_to_bm = {int(r[0]): r[1] for r in bm_paths[feed]["data"]}
+                bm_name = serial_to_bm.get(serial_num, "")
+                if bm_name:
+                    bm_id = bm_map.get(bm_name)
+                else:
+                    f_chk = "No"
+            else:
+                f_chk = "No"
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain} | FeedCheck: {f_chk} | BM: {bm_name} | Source: {scraper_used}")
     return {
@@ -508,7 +516,11 @@ class TypeBPipeline:
                     r1_idx = ord(h_map["r1"]) - ord('A')
                     scrap_stat = row[r1_idx] if len(row) > r1_idx else ""
                     if not (sd and ld and dp_id and funnel_id and scrap_stat.startswith("Yes")):
-                        res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
+                        existing_reason = scrap_stat.strip()
+                        if existing_reason and not existing_reason.startswith("Yes"):
+                            res = {"type": "failed", "reason": existing_reason}
+                        else:
+                            res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
                         res = {
                             "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "sd": sd, "ld": ld,
@@ -555,7 +567,7 @@ class TypeBPipeline:
                         scraper_col = h_map.get("scraper_col", "Y")
                         await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
 
-                if self.mode != "phase1" and (is_success or self.mode != "phase2"):
+                if self.mode != "phase1":
                     pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
                     dp_id = row[h_map["dp_id"]]
                     funnel_id = row[h_map["funnel_id"]]
