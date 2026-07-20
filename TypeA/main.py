@@ -954,7 +954,8 @@ class TypeAPipeline:
                 
                 for attempt in range(3):
                     try:
-                        await asyncio.wait_for(ws.batch_update(updates, value_input_option='USER_ENTERED'), timeout=60)
+                        import copy
+                        await asyncio.wait_for(ws.batch_update(copy.deepcopy(updates), value_input_option='USER_ENTERED'), timeout=60)
                         success = True
                         break
                     except asyncio.TimeoutError:

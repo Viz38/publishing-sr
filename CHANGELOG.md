@@ -1,3 +1,20 @@
+## [2026-07-17] Updates from odugudhananjay-droid
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- sr_common/utils.py
+- TypeA/runner.sh
+- TypeB/runner.sh
+- TypeC/runner.sh
+- tests/test_cache_manager.py
+- tests/test_tracking_cache_manager.py
+Reason:
+Updated new prompt changes, increased the readability in sheet, fixed special flags issues. Added manual curation date before funnel transaction. Added json files in the logs to monitor the caching and also changed the logic of caching.
+Related tests:
+- tests/test_cache_manager.py
+- tests/test_tracking_cache_manager.py
+
 ## [2026-06-05] Standardize Discovery Routing
 Files changed:
 - TypeA/main.py
