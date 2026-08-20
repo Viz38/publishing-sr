@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Doraemon: Kiro is working",
+  "description": "Tells the Doraemon mascot that Kiro is about to use a tool, and resets the quiet-period timer that decides when Doraemon suspects Kiro is waiting on you.",
+  "version": "1",
+  "when": {
+    "type": "preToolUse"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "mkdir -p .kiro/doraemon && printf '%s' '{\"state\":\"working\",\"message\":\"Kiro is working on it~\"}' > .kiro/doraemon/agent-state.json"
+  }
+}

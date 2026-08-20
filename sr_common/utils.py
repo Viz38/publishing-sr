@@ -439,7 +439,7 @@ def extract_descriptions(text: str) -> Tuple[str, str]:
     
     # Check for AI refusal or insufficient data signals
     text_lower = text.lower()
-    refusal_signals = ["i cannot", "not available", "no information", "insufficient data", "cannot provide", "don't have access", "does not contain"]
+    refusal_signals = ["i cannot", "not available", "no information", "insufficient data", "cannot provide", "don't have access", "does not contain","content insufficient", "content insufficient for generating sd or ld"]
     if any(sig in text_lower for sig in refusal_signals):
         return "NO_DATA", "NO_DATA"
     

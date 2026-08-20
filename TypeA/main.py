@@ -303,6 +303,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         pipeline_logger.info(f"PROCESS: Found raw data for {domain}, skipping scrape.")
         final_url = f"https://{domain}"
         combined = raw_data.strip()
+        p1_content = combined
+        p2_content = ""
+        has_p2_content = False
     else:
         # Tier 2: Tech Crawler — check Supabase
         supabase_content = await fetch_scraped_content(domain)
@@ -310,6 +313,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             combined = supabase_content
             scraper_used = "Tech Crawler"
             pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(combined)} chars)")
+            p1_content = combined
+            p2_content = ""
+            has_p2_content = False
         else:
             # Tier 3: BU — run the built-in StealthFetcher
             scraper_used = "BU"
@@ -329,85 +335,154 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
                 pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked ({kw})")
                 return {"type": "error", "reason": "Parked", "scraper_used": scraper_used}
             
-            body_results = [home_text]
             links = extract_links(html, final_url)
             
             target_urls = []
             scraped_urls = {final_url}
-            for group in paths:
+            url_to_group_idx = {}
+            for i, group in enumerate(paths):
                 for p in group:
                     m = next((l for l in links if p in l and l not in scraped_urls), None)
-                    if m: target_urls.append(m); scraped_urls.add(m); break
+                    if m:
+                        target_urls.append(m)
+                        scraped_urls.add(m)
+                        url_to_group_idx[m] = i
+                        break
+            
+            about_text = ""
+            other_texts = []
             
             if target_urls:
                 pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
                 res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
-                body_results = []
-                for r in res:
+                for u, r in zip(target_urls, res):
                     if r[0]:
                         cleaned = await clean_html(r[0])
-                        body_results.append(cleaned)
+                        group_idx = url_to_group_idx[u]
+                        if group_idx == 0:
+                            about_text = cleaned
+                        else:
+                            other_texts.append(cleaned)
             
+            # P1 gets home and about page content
+            p1_content_parts = [home_text]
+            if about_text:
+                p1_content_parts.append(about_text)
+            p1_content = "\n\n".join(p1_content_parts)
+            
+            # P2 gets the rest of the pages
+            p2_content = "\n\n".join(other_texts)
+            has_p2_content = len(p2_content.strip()) > 100
+            
+            # Combined body results is still used for overall length logging
+            body_results = [home_text]
+            if about_text:
+                body_results.append(about_text)
+            body_results.extend(other_texts)
             combined = "\n\n".join(body_results)
+            
     pipeline_logger.info(f"PROCESS: Combined body length: {len(combined)} | Source: {scraper_used}")
-    
     llm_calls = 0
     llm_rows = 1
+    tokens = {"in": 0, "out": 0, "think": 0}
+    think_text = ""
+    sd, ld1, ld2 = "", "", ""
+    _ = ""
     
-    parts_p1 = prompts[0].split("XX")
-    if len(parts_p1) == 2:
-        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
-        user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + combined
-        cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
-        p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1, cache_manager=cache_manager, cache_key="prompt_0")
-        bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]) # for logging
+    # Check length for P1 (> 400 characters)
+    p1_coro = None
+    if len(p1_content.strip()) > 400:
+        parts_p1 = prompts[0].split("XX")
+        if len(parts_p1) == 2:
+            sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
+            user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + p1_content
+            cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
+            pipeline_logger.info(f"P1 User Prompt for {domain}:\n{user_p1}")
+            p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1, cache_manager=cache_manager, cache_key="prompt_0")
+            bm_p1_raw = prompts[0].replace("XX", p1_content)
+        else:
+            bm_p1_raw = prompts[0].replace("XX", p1_content)
+            p1_coro = call_gemini_api(session, bm_p1_raw, gemini_limiter)
     else:
-        bm_p1_raw = prompts[0].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]])
-        p1_coro = call_gemini_api(session, bm_p1_raw, gemini_limiter)
+        pipeline_logger.warning(f"PROCESS: P1 content length ({len(p1_content.strip())}) <= 400 for {domain}. Skipping P1 LLM call.")
 
-    parts_p2 = prompts[1].split("XX")
+    # Check length for P2 (> 400 characters)
     p2_coro = None
-    if len(parts_p2) == 2:
-        sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
-        user_p2 = "Raw Content:\n" + combined[:CONFIG["MAX_PROMPT_SIZE"]]
-        cache_id2 = await cache_manager.get_or_create(session, "prompt_1", sys_p2, ttl="86400s")
-        p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_1")
+    if has_p2_content and len(p2_content.strip()) > 400:
+        parts_p2 = prompts[0].split("XX")
+        if len(parts_p2) == 2:
+            sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
+            user_p2 = "Raw Content:\n" + p2_content
+            pipeline_logger.info(f"P2 User Prompt for {domain}:\n{user_p2}")
+            cache_id2 = await cache_manager.get_or_create(session, "prompt_0", sys_p2, ttl="86400s")
+            p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_0")
+    elif has_p2_content:
+        pipeline_logger.info(f"PROCESS: P2 content length ({len(p2_content.strip())}) <= 400 for {domain}. Skipping P2 LLM call.")
     
-    if p2_coro:
+    if p1_coro and p2_coro:
         res_p1_obj, res_p2_obj = await asyncio.gather(p1_coro, p2_coro)
         llm_calls += 2
-    else:
+        
+        res_p1 = res_p1_obj.text
+        # pipeline_logger.info(f"GEMINI P1 RESPONSE for {domain}:\n{res_p1}")
+        in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
+        if res_p1_obj.thinking_text: think_text += f"P1:\n{res_p1_obj.thinking_text}\n"
+        
+        tokens["in"] += in1; tokens["out"] += out1; tokens["think"] += think1
+        sd, ld1 = extract_descriptions(res_p1)
+        
+        res_p2 = res_p2_obj.text
+        # pipeline_logger.info(f"GEMINI P2 RESPONSE for {domain}:\n{res_p2}")
+        in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
+        if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
+        
+        tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
+        _, ld2 = extract_descriptions(res_p2)
+    elif p1_coro:
         res_p1_obj = await p1_coro
         llm_calls += 1
-
-    res_p1 = res_p1_obj.text
-    in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
-    think_text = f"P1:\n{res_p1_obj.thinking_text}\n" if res_p1_obj.thinking_text else ""
-    
-    tokens = {"in": in1, "out": out1, "think": think1}
-    
-    sd, ld1 = extract_descriptions(res_p1)
-    if sd == "NO_DATA":
-        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
-        return {"type": "error", "reason": "Low content", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
-    if sd == "PARKED_LLM":
-        pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
-        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
-    if not sd or not ld1:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
-
-    if not p2_coro:
-        p2 = prompts[1].replace("XX", combined[:CONFIG["MAX_PROMPT_SIZE"]]).replace("YY", sd)
-        res_p2_obj = await call_gemini_api(session, p2, gemini_limiter)
+        
+        res_p1 = res_p1_obj.text
+        # pipeline_logger.info(f"GEMINI P1 RESPONSE for {domain}:\n{res_p1}")
+        in1, out1, think1 = res_p1_obj.prompt_tokens, res_p1_obj.candidate_tokens, res_p1_obj.thinking_tokens
+        if res_p1_obj.thinking_text: think_text += f"P1:\n{res_p1_obj.thinking_text}\n"
+        
+        tokens["in"] += in1; tokens["out"] += out1; tokens["think"] += think1
+        sd, ld1 = extract_descriptions(res_p1)
+    elif p2_coro:
+        res_p2_obj = await p2_coro
         llm_calls += 1
-    
-    res_p2 = res_p2_obj.text
-    in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
-    if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
-    
-    tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
-    _, ld2 = extract_descriptions(res_p2)
+        
+        res_p2 = res_p2_obj.text
+        # pipeline_logger.info(f"GEMINI P2 RESPONSE for {domain}:\n{res_p2}")
+        in2, out2, think2 = res_p2_obj.prompt_tokens, res_p2_obj.candidate_tokens, res_p2_obj.thinking_tokens
+        if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
+        
+        tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
+        sd, ld2 = extract_descriptions(res_p2)
+        ld1 = ld2
+
+    # pipeline_logger.error(f"SD AND LD: {sd} | {ld1}")
+
+
+    if sd == "NO_DATA" or sd =="PARKED_LLM" or sd =="" or sd == None:
+        if _ != "NO_DATA" and _ != "PARKED_LLM" and _ !="" and _ != None:
+            sd = _
+            ld1 = ld2
+    # pipeline_logger.error(f"SD AND LD: {sd} | {ld1}")
+
+    if sd == "NO_DATA" :
+        # pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Insufficient content (AI reported NO_DATA)")
+        return {"type": "error", "reason": "Low content(Gemini ran)", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
+    if sd == "PARKED_LLM" :
+        # pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
+        return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
+
+
+
+    if not sd or not ld1:
+        # pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions | {sd} | {ld1}")
+        return {"type": "error", "reason": "Low content(Scraper ran)", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
     
     ld_main = f"{ld1}\n\n{ld2}"
     feed = row[h_map["feed"]].split(" : ")[1] if " : " in row[h_map["feed"]] else row[h_map["feed"]]
@@ -794,7 +869,7 @@ class TypeAPipeline:
                     else:
                         reason = res.get('reason', 'Failed')
                         if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
-                            reason = "Unable To Scrap"
+                            reason = reason
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
                         await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
@@ -890,7 +965,7 @@ class TypeAPipeline:
                     elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
                         not_updated_text = "NoWebscrap"
                     else:
-                        not_updated_text = "Irrelevant"
+                        not_updated_text = "NoWebscrap"
                     
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld1") if is_success else None

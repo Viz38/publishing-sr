@@ -1,0 +1,13 @@
+{
+  "enabled": true,
+  "name": "Doraemon: Kiro is thinking",
+  "description": "Tells the Doraemon mascot that a prompt was submitted, so the bubble shows a thinking state while you are away from the IDE.",
+  "version": "1",
+  "when": {
+    "type": "userPromptSubmit"
+  },
+  "then": {
+    "type": "runCommand",
+    "command": "mkdir -p .kiro/doraemon && printf '%s' '{\"state\":\"thinking\",\"message\":\"Kiro is thinking about it~\"}' > .kiro/doraemon/agent-state.json"
+  }
+}
