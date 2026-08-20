@@ -136,7 +136,7 @@ case "$USER_LOWER" in
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_4230"
         ;;
     "tracxn-lp-811")
-        IDENTITY="Device-599"
+        IDENTITY="tracxn-lp-811"
         [ -z "$TUNNEL_TOKEN" ] && TUNNEL_TOKEN="$TUNNEL_TOKEN_599"
         ;;
     "tracxn-lp-477")
