@@ -723,6 +723,9 @@ class TypeAPipeline:
                                 writer_task.cancel()
                                 break
                             else:
+                                for p in pending:
+                                    p.cancel()
+                                writer_task.cancel()
                                 for t in done:
                                     if t != queue_task and t.exception():
                                         raise t.exception()

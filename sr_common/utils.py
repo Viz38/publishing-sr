@@ -46,6 +46,11 @@ class SystemHealthMonitor:
                 if logger:
                     logger.error(f"HEALTH_GATE: Timeout exceeded waiting for resources ({reason})")
                 raise TimeoutError(f"Resource saturation timeout: {reason}")
+            elif timeout is None and (time.time() - start_time) > 120:
+                # If no timeout specified, don't hang forever (max 2 mins)
+                if logger:
+                    logger.warning(f"HEALTH_GATE: Max wait reached, proceeding despite {reason}")
+                break
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
