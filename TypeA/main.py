@@ -418,7 +418,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_0")
     elif has_p2_content:
         pipeline_logger.info(f"PROCESS: P2 content length ({len(p2_content.strip())}) <= 400 for {domain}. Skipping P2 LLM call.")
-    
+    sd, ld1, sd2, ld2 = None, "", None, ""
     if p1_coro and p2_coro:
         res_p1_obj, res_p2_obj = await asyncio.gather(p1_coro, p2_coro)
         llm_calls += 2
@@ -437,7 +437,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         if res_p2_obj.thinking_text: think_text += f"P2:\n{res_p2_obj.thinking_text}\n"
         
         tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
-        _, ld2 = extract_descriptions(res_p2)
+        sd2, ld2 = extract_descriptions(res_p2)
     elif p1_coro:
         res_p1_obj = await p1_coro
         llm_calls += 1
@@ -466,8 +466,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
 
 
     if sd == "NO_DATA" or sd =="PARKED_LLM" or sd =="" or sd == None:
-        if _ != "NO_DATA" and _ != "PARKED_LLM" and _ !="" and _ != None:
-            sd = _
+        if sd2 is not None and sd2 != "NO_DATA" and sd2 != "PARKED_LLM" and sd2 !="":
+            sd = sd2
             ld1 = ld2
     # pipeline_logger.error(f"SD AND LD: {sd} | {ld1}")
 
