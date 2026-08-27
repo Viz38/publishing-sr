@@ -612,8 +612,6 @@ class TypeBPipeline:
                         f_id_to_move = "5dc5863a2799a51cc0ff30e2" if is_full_success else "64197f01a6dcff6572453ead"
                         As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                         if As in (200, 201):
-                            if f_id_to_move == "5dc5863a2799a51cc0ff30e2" and feed_status != 422:
-                                await update_manual_curation_date(session, dp_id, tracxn_limiter, HEADERS)
                             ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
                             if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
                                 ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
