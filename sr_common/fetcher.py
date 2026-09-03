@@ -58,17 +58,15 @@ class StealthFetcher:
                     async with BROWSER_SEMAPHORE:
                         logger.info(f"TIER 2: Camoufox Fetch for {url} (attempt {attempt+1})")
                         profile = get_browser_profile("windows")
+                        screen_res = {"width": profile["screen_resolution"][0], "height": profile["screen_resolution"][1]}
                         context = await browser.new_context(
                             ignore_https_errors=True,
-                            screen_resolution=profile["screen_resolution"],
-                            viewport=profile["screen_resolution"],
+                            screen=screen_res,
+                            viewport=screen_res,
                             device_scale_factor=profile["device_scale_factor"],
                             user_agent=profile["user_agent"]
                         )
                         page = await context.new_page()
-                        
-                        # Block media for speed
-                        await page.route("**/*", self._block_media)
                         
                         response = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
                         
@@ -95,7 +93,7 @@ class StealthFetcher:
                 )
                 if s_resp.status == 200:
                     content = s_resp.text
-                    if self._is_valid(content, min_len=300):
+                    if self._is_valid(content, min_len=50):
                         logger.info(f"TIER 3 SUCCESS: {url} -> {s_resp.url}")
                         return content, str(s_resp.url), "Success"
         except Exception as e:
@@ -106,7 +104,7 @@ class StealthFetcher:
     def _is_valid(self, content: str, min_len: int = 500) -> bool:
         if not content: return False
         lower_content = content.lower()
-        if "sgcaptcha" in lower_content or "challenge-platform" in lower_content:
+        if "sgcaptcha" in lower_content or "<title>just a moment...</title>" in lower_content:
             return False
         return len(content) > min_len
 

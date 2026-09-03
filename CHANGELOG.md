@@ -1,3 +1,13 @@
+## [2026-09-03] Enhance Stealth Fetcher WAF Evasion and Fallback Logic
+Files changed:
+- sr_common/fetcher.py
+- TypeC/main.py
+- test_100.py
+Reason:
+Resolved Tier 3 crashing on global browser bin path overriding. Removed image blocking in stealth tiers to improve WAF evasion. Refactored HTML validation to eliminate false positives on Cloudflare artifacts and accept valid sparse domains, significantly increasing overall success rate on hard domains.
+Related tests:
+N/A
+
 ## [2026-07-17] Updates from odugudhananjay-droid
 Files changed:
 - TypeA/main.py
