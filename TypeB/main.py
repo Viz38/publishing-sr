@@ -383,19 +383,28 @@ class TypeBPipeline:
                 
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
                 all_rows = await ws.get_values(f"A{self.start_row}:AB")
+                
+                is_shifted = False
+                for r in all_rows:
+                    if len(r) > 1 and r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
+                        is_shifted = True
+                        break
+                    elif len(r) > 1 and "." in r[1] and " " not in r[1].strip():
+                        is_shifted = False
+                        break
+
                 data_rows = []
                 for i, r in enumerate(all_rows):
                     if len(r) < 2: continue
                     r.extend([""] * max(0, 40 - len(r)))
                     real_idx = self.start_row + i
-                    # Detect if row is a header or engine label
-                    if r[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
-                        # Shifted sheet detection: Domain is in index 2
+                    
+                    if is_shifted:
                         if len(r) > 2 and "." in r[2] and " " not in r[2].strip():
                             data_rows.append((real_idx, r))
-                    elif "." in r[1] and " " not in r[1].strip():
-                        # Standard sheet detection: Domain is in index 1
-                        data_rows.append((real_idx, r))
+                    else:
+                        if "." in r[1] and " " not in r[1].strip():
+                            data_rows.append((real_idx, r))
                 
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")

@@ -314,7 +314,10 @@ class TypeBPipeline:
                 pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
                 # Optimize: Only fetch from start_row onwards
                 all_rows = await ws.get_values(f"A{self.start_row}:Z")
-                data_rows = [r for r in all_rows if len(r) > 1 and r[1].strip() and r[1].strip() not in ["TypeA", "TypeB", "TypeC"]]
+                data_rows = []
+                for i, r in enumerate(all_rows, start=self.start_row):
+                    if len(r) > 1 and r[1].strip() and r[1].strip() not in ["TypeA", "TypeB", "TypeC"]:
+                        data_rows.append((i, r))
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
@@ -351,7 +354,7 @@ class TypeBPipeline:
         paths = [[c for c in r if c.strip()] for r in (await (await sheet.worksheet("Paths")).get_values("A1:T50")) if any(r)]
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in enumerate(data_rows, start=self.start_row):
+        for idx, row in data_rows:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             await work_queue.put((idx, row))
 

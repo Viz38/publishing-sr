@@ -374,7 +374,10 @@ class TypeCPipeline:
         }
         
         all_rows = await ws.get_values()
-        data_rows = [r for r in all_rows[self.start_row-1:] if len(r) > 1 and r[1].strip()]
+        data_rows = []
+        for i, r in enumerate(all_rows[self.start_row-1:], start=self.start_row):
+            if len(r) > 1 and r[1].strip():
+                data_rows.append((i, r))
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_values())[1:10]]
@@ -382,7 +385,7 @@ class TypeCPipeline:
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in enumerate(data_rows, start=self.start_row):
+        for idx, row in data_rows:
             await work_queue.put((idx, row))
 
         cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY)
