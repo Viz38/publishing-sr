@@ -746,6 +746,10 @@ while true; do
             # Retrieve absolute path of uv to guarantee execution context
             UV_PATH=$(command -v uv)
             
+            # Override host platform to avoid failure on unsupported/newer OS versions (e.g. Ubuntu 26.04)
+            export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE="ubuntu24.04-x64"
+            export PLAYWRIGHT_SKIP_VALIDATE_HOST_REQUIREMENTS=true
+            
             if [[ "$OS" == "Linux" ]]; then
                 echo -e "   ▶ Installing Linux-specific browser dependencies..."
                 "$UV_PATH" run python -m patchright install-deps >> "$SETUP_LOG" 2>&1
