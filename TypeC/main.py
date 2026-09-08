@@ -373,13 +373,13 @@ class TypeCPipeline:
             "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
         }
         
-        all_rows = await ws.get_all_values()
+        all_rows = await ws.get_values()
         data_rows = [r for r in all_rows[self.start_row-1:] if len(r) > 1 and r[1].strip()]
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
-        prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
+        prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_values())[1:10]]
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
-        f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_all_values())}
+        f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
 
         work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
         for idx, row in enumerate(data_rows, start=self.start_row):

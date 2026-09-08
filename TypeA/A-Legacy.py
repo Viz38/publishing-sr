@@ -87,7 +87,7 @@ class GoogleSheetsClient:
         gc = await self.authorize()
         sheet = await gc.open_by_key(Config.SHEET_ID)
         worksheet = await sheet.worksheet(sheet_name)
-        data = await worksheet.get_all_values()
+        data = await worksheet.get_values()
         return data[start_row - 1:]
 
     async def write_sheet_data(self, sheet_name: str, data: List[List[Any]], start_row: int,
@@ -455,7 +455,7 @@ class DataProcessor:
         gc = await self.client.authorize()
         sheet = await gc.open_by_key("1N9GgEXIiR7QwEpzpJCvGbXlZ_kCgN9ev8fj0Ynv98MU")
         worksheet = await sheet.worksheet("Prompts")
-        data = await worksheet.get_all_values()
+        data = await worksheet.get_values()
         self.main_prompts = [row[1] for row in data[1:10]]
         return self.main_prompts
 
@@ -467,7 +467,7 @@ class DataProcessor:
         gc = await self.client.authorize()
         sheet = await gc.open_by_key(Config.SHEET_ID)
         worksheet = await sheet.worksheet("Paths")
-        data = await worksheet.get_all_values()
+        data = await worksheet.get_values()
         self.match_paths = [
             [cell for cell in row if cell.strip()]
             for row in data if any(cell.strip() for cell in row)
@@ -482,7 +482,7 @@ class DataProcessor:
         gc = await self.client.authorize()
         sheet = await gc.open_by_key("1VSvvKsjO5ZPSg3ff6SnwPEQ0i9BTwzAI-aCiWxjHzYU")
         worksheet = await sheet.worksheet("Feed Owner Details")
-        data = await worksheet.get_all_values()
+        data = await worksheet.get_values()
         self.feed_id_map = {row[0]: row[1] for row in data if len(row) > 1}
         return self.feed_id_map
 
@@ -502,7 +502,7 @@ class DataProcessor:
 
             # Process 1st Level Sheet
             first_level_ws = await sheet.worksheet("1st Level")
-            first_level_data = await first_level_ws.get_all_values()
+            first_level_data = await first_level_ws.get_values()
 
             for row in first_level_data[1:]:
                 if len(row) < 6:
@@ -536,7 +536,7 @@ class DataProcessor:
 
             # Process 2nd Level Sheet
             second_level_ws = await sheet.worksheet("2nd Level Live BM's")
-            second_level_data = await second_level_ws.get_all_values()
+            second_level_data = await second_level_ws.get_values()
 
             for row in second_level_data[1:]:
                 if len(row) < 4:
@@ -580,7 +580,7 @@ class DataProcessor:
         gc = await self.client.authorize()
         sheet = await gc.open_by_key("1HEmWY4AeFltmjPbMzX-xDydTsncMX53hpbgHpsS_-44")
         worksheet = await sheet.worksheet("Feed Definition")
-        data = await worksheet.get_all_values()
+        data = await worksheet.get_values()
         self.feed_def_map = {row[1]: row[3] for row in data if len(row) > 1}
         return self.feed_def_map
 
@@ -1216,13 +1216,13 @@ async def feed_def(client: GoogleSheetsClient) -> Dict[str, str]:
     # First sheet
     sheet1 = await gc.open_by_key("1BhWtCW8j3ixsXf8_uO8GjaMYl_txhAB-561Hbyy9jh4")
     worksheet1 = await sheet1.worksheet("Feed Definition (Worked)")
-    data1 = await worksheet1.get_all_values()
+    data1 = await worksheet1.get_values()
     data_dict = {row[1]: row[4] for row in data1 if len(row) > 4}
 
     # Second sheet
     sheet2 = await gc.open_by_key("1zL2hMn6FhSnuAw0Qu7RHj3oAEFxchzBJZKLNg5Y4mM4")
     worksheet2 = await sheet2.worksheet("Feed Definition (Worked)")
-    data2 = await worksheet2.get_all_values()
+    data2 = await worksheet2.get_values()
 
     # Merge data
     for row in data2:

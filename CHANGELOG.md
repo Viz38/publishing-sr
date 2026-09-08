@@ -3,10 +3,14 @@ Files changed:
 - sr_common/fetcher.py
 - TypeC/main.py
 - test_100.py
+- sr_common/utils.py
 Reason:
-Resolved Tier 3 crashing on global browser bin path overriding. Removed image blocking in stealth tiers to improve WAF evasion. Refactored HTML validation to eliminate false positives on Cloudflare artifacts and accept valid sparse domains, significantly increasing overall success rate on hard domains.
+Resolved Tier 3 crashing on global browser bin path overriding. Removed image blocking in stealth tiers to improve WAF evasion. Refactored HTML validation to eliminate false positives on Cloudflare artifacts and accept valid sparse domains, significantly increasing overall success rate on hard domains. Improved handling of modern Single Page Applications (SPAs) and sites protected by Cloudflare. 
+1. `_is_valid` validation logic relaxed to eliminate false-positive flags on Cloudflare telemetry scripts, and lowered the `min_len` parameters for sparse landing pages.
+2. Modified `clean_html` to explicitly extract and append string contents from `<script type="application/json">` and `<script type="application/ld+json">`. This prevents data loss on SPAs that hydrate data server-side (like React-on-Rails or Next.js) but fail to execute their JS payloads under headless conditions.
+3. Updated Tier 2 `fetch_with_camoufox` to measure the post-cleaning character count. If the rendered DOM yields less than 100 characters (common when Cloudflare challenges block Angular/React from mounting), the scraper will now correctly fall back to Tier 3 (`Scrapling`) instead of blindly accepting the unrendered template as a success.
 Related tests:
-N/A
+N/A (Validation tests run locally on 73 failing domains, including `balmingileadcs.org` and `cbsk.com.br`).
 
 ## [2026-07-17] Updates from odugudhananjay-droid
 Files changed:

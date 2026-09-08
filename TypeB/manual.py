@@ -328,11 +328,11 @@ class TypeBPipeline:
         }
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
-        prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_all_values())[1:10]]
+        prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_values())[1:10]]
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
-        f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_all_values())}
+        f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
         bm_sheet = await gc.open_by_key(self.config["BM_MAPPING_SHEET_ID"])
-        bm_data = await (await bm_sheet.worksheet("BM's & Definition")).get_all_values()
+        bm_data = await (await bm_sheet.worksheet("BM's & Definition")).get_values()
         bm_map = {r[1]: r[2] for r in bm_data[1:] if len(r) > 2}
         bm_paths = {}
         for r in bm_data[1:]:
@@ -342,7 +342,7 @@ class TypeBPipeline:
         f_defs = {}
         for sid in [self.config["FEED_DEF_SHEET_ID_1"], self.config["FEED_DEF_SHEET_ID_2"]]:
             try:
-                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition (Worked)")).get_all_values()
+                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition (Worked)")).get_values()
                 for r in fd_data[1:]:
                     if len(r) > 4: f_defs[r[1]] = r[4]
             except: pass

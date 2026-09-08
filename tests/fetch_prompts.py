@@ -25,7 +25,7 @@ async def main():
     sheet = await gc.open_by_key(sheet_id)
     ws = await sheet.worksheet('Prompts')
     
-    data = await ws.get_all_values()
+    data = await ws.get_values()
     # Let's print out all prompts from index 1 to 10
     for i, row in enumerate(data[1:11]):
         if len(row) > 1:

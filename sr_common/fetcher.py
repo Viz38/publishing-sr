@@ -74,8 +74,13 @@ class StealthFetcher:
                             await simulate_human_movement(page)
                             content = await page.content()
                             if self._is_valid(content, min_len=500):
-                                logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")
-                                return content, str(page.url), "Success"
+                                from sr_common.utils import clean_html
+                                cleaned = await clean_html(content)
+                                if len(cleaned) > 100:
+                                    logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")
+                                    return content, str(page.url), "Success"
+                                else:
+                                    logger.warning(f"Tier 2 yielded low text content ({len(cleaned)} chars). Falling back to Tier 3 for {url}")
                         break
                 except Exception as e:
                     logger.warning(f"TIER 2 ERR: {url} | {e}")

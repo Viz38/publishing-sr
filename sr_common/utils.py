@@ -431,10 +431,21 @@ async def clean_html(html: str) -> str:
     
     def _clean(h):
         from bs4 import BeautifulSoup
+        import json
         soup = BeautifulSoup(h, 'lxml')
+        
+        # Extract JSON-LD and application/json state
+        json_texts = []
+        for s in soup('script'):
+            t = s.get('type', '').lower()
+            if t in ['application/json', 'application/ld+json'] and s.string:
+                json_texts.append(s.string)
+                
         for s in soup(['script', 'style', 'nav', 'footer', 'header']):
             s.decompose()
-        return " ".join(soup.get_text(separator=' ').split())
+            
+        base_text = " ".join(soup.get_text(separator=' ').split())
+        return base_text + " " + " ".join(json_texts)
         
     return await asyncio.to_thread(_clean, html)
 

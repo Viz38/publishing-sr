@@ -707,8 +707,8 @@ class TypeAPipeline:
         
         pipeline_logger.info("Connecting to Master Sheet...")
         m_sheet = await gc.open_by_key(self.config["MASTER_SHEET_ID"])
-        f_lvl = await (await m_sheet.worksheet("1st Level")).get_all_values()
-        s_lvl = await (await m_sheet.worksheet("2nd Level Live BM's")).get_all_values()
+        f_lvl = await (await m_sheet.worksheet("1st Level")).get_values()
+        s_lvl = await (await m_sheet.worksheet("2nd Level Live BM's")).get_values()
         
         bm_mapping, bm_ids, bm_1st_stat = {}, {}, {}
         for r in f_lvl[1:]:
@@ -746,14 +746,14 @@ class TypeAPipeline:
             bm_mapping[f]["2ndLevel"].append([len(bm_mapping[f]["2ndLevel"])+1, ".", p, " - " + desc])
  
         pipeline_logger.info("Connecting to Prompts & Feed Owner sheets...")
-        prompts = [r[1] for r in (await (await (await gc.open_by_key(CONFIG["PROMPTS_SHEET_ID"])).worksheet("Prompts")).get_all_values())[1:10]]
-        f_ids = {r[0]: r[1] for r in (await (await (await gc.open_by_key(CONFIG["FEED_OWNER_SHEET_ID"])).worksheet("Feed Owner Details")).get_all_values())}
+        prompts = [r[1] for r in (await (await (await gc.open_by_key(CONFIG["PROMPTS_SHEET_ID"])).worksheet("Prompts")).get_values())[1:10]]
+        f_ids = {r[0]: r[1] for r in (await (await (await gc.open_by_key(CONFIG["FEED_OWNER_SHEET_ID"])).worksheet("Feed Owner Details")).get_values())}
         
         pipeline_logger.info("Connecting to Feed Definition sheets...")
         f_defs = {}
         for sid in [CONFIG["FEED_DEF_SHEET_ID_1"], CONFIG["FEED_DEF_SHEET_ID_2"]]:
             try:
-                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition")).get_all_values()
+                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition")).get_values()
                 for r in fd_data[1:]:
                     if len(r) > 3: f_defs[r[1]] = r[3]
             except: pass
