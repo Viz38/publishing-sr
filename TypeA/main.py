@@ -353,9 +353,9 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             other_texts = []
             
             if target_urls:
-                pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain}")
-                res = await asyncio.gather(*[fetcher.fetch(browser, u) for u in target_urls])
-                for u, r in zip(target_urls, res):
+                pipeline_logger.info(f"PROCESS: Fetching {len(target_urls)} sub-pages for {domain} sequentially to prevent overload")
+                for u in target_urls:
+                    r = await fetcher.fetch(browser, u)
                     if r[0]:
                         cleaned = await clean_html(r[0])
                         group_idx = url_to_group_idx[u]

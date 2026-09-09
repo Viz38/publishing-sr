@@ -59,34 +59,42 @@ class StealthFetcher:
                         logger.info(f"TIER 2: Camoufox Fetch for {url} (attempt {attempt+1})")
                         profile = get_browser_profile("windows")
                         screen_res = {"width": profile["screen_resolution"][0], "height": profile["screen_resolution"][1]}
-                        context = await browser.new_context(
-                            ignore_https_errors=True,
-                            screen=screen_res,
-                            viewport=screen_res,
-                            device_scale_factor=profile["device_scale_factor"],
-                            user_agent=profile["user_agent"]
-                        )
-                        page = await context.new_page()
                         
-                        response = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
-                        
-                        if response and response.status == 200:
-                            await simulate_human_movement(page)
-                            content = await page.content()
-                            if self._is_valid(content, min_len=500):
-                                from sr_common.utils import clean_html
-                                cleaned = await clean_html(content)
-                                if len(cleaned) > 100:
-                                    logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")
-                                    return content, str(page.url), "Success"
-                                else:
-                                    logger.warning(f"Tier 2 yielded low text content ({len(cleaned)} chars). Falling back to Tier 3 for {url}")
+                        async def _run_tier2():
+                            ctx = await browser.new_context(
+                                ignore_https_errors=True,
+                                screen=screen_res,
+                                viewport=screen_res,
+                                device_scale_factor=profile["device_scale_factor"],
+                                user_agent=profile["user_agent"]
+                            )
+                            try:
+                                page = await ctx.new_page()
+                                response = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
+                                if response and response.status == 200:
+                                    await simulate_human_movement(page)
+                                    content = await page.content()
+                                    if self._is_valid(content, min_len=500):
+                                        from sr_common.utils import clean_html
+                                        cleaned = await clean_html(content)
+                                        if len(cleaned) > 100:
+                                            logger.info(f"TIER 2 SUCCESS: {url} -> {page.url}")
+                                            return content, str(page.url), "Success"
+                                        else:
+                                            logger.warning(f"Tier 2 yielded low text content ({len(cleaned)} chars). Falling back to Tier 3 for {url}")
+                                return None, None, "Failed or Low Content"
+                            finally:
+                                await ctx.close()
+
+                        res_content, res_url, res_status = await asyncio.wait_for(_run_tier2(), timeout=self.timeout + 15.0)
+                        if res_content:
+                            return res_content, res_url, res_status
                         break
+                except asyncio.TimeoutError:
+                    logger.error(f"TIER 2 TIMEOUT: Browser pipe hung for {url}")
                 except Exception as e:
                     logger.warning(f"TIER 2 ERR: {url} | {e}")
                     if "Proxy" in str(e) and attempt == 0: continue
-                finally:
-                    if context: await context.close()
 
         # TIER 3: Scrapling Stealth (Playwright-backed)
         try:
