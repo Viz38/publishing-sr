@@ -313,6 +313,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         # Tier 2: Tech Crawler — check Supabase
         supabase_content = await fetch_scraped_content(domain)
         if supabase_content:
+            final_url = f"https://{domain}"
             combined = supabase_content
             scraper_used = "Tech Crawler"
             pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(combined)} chars)")
@@ -1012,7 +1013,7 @@ class TypeAPipeline:
                     raise
                 pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
                 if self.mode != "phase2":
-                    stat_col = h_map.get("r1", "N")
+                    stat_col = h_map.get("r1", "I")
                     await r_q.put({'range': f"{stat_col}{idx}", 'values': [[f"Fatal Error: {str(e)[:50]}"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally: w_q.task_done()
