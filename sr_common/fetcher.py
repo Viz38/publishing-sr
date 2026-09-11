@@ -61,14 +61,15 @@ class StealthFetcher:
                         screen_res = {"width": profile["screen_resolution"][0], "height": profile["screen_resolution"][1]}
                         
                         async def _run_tier2():
-                            ctx = await browser.new_context(
-                                ignore_https_errors=True,
-                                screen=screen_res,
-                                viewport=screen_res,
-                                device_scale_factor=profile["device_scale_factor"],
-                                user_agent=profile["user_agent"]
-                            )
+                            ctx = None
                             try:
+                                ctx = await browser.new_context(
+                                    ignore_https_errors=True,
+                                    screen=screen_res,
+                                    viewport=screen_res,
+                                    device_scale_factor=profile["device_scale_factor"],
+                                    user_agent=profile["user_agent"]
+                                )
                                 page = await ctx.new_page()
                                 response = await page.goto(url, wait_until="domcontentloaded", timeout=self.timeout * 1000)
                                 if response and response.status == 200:
@@ -84,7 +85,11 @@ class StealthFetcher:
                                             logger.warning(f"Tier 2 yielded low text content ({len(cleaned)} chars). Falling back to Tier 3 for {url}")
                                 return None, None, "Failed or Low Content"
                             finally:
-                                await ctx.close()
+                                if ctx:
+                                    try:
+                                        await asyncio.wait_for(ctx.close(), timeout=5.0)
+                                    except Exception as ce:
+                                        logger.warning(f"TIER 2 ERR: Failed to close context cleanly: {ce}")
 
                         res_content, res_url, res_status = await asyncio.wait_for(_run_tier2(), timeout=self.timeout + 15.0)
                         if res_content:

@@ -169,8 +169,11 @@ class TrackingCacheManager(GeminiCacheManager):
                 "caches": caches_list
             }
             try:
-                with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                temp_path = self.stats_filepath + ".tmp"
+                with open(temp_path, "w", encoding="utf-8") as f:
                     json.dump(data_to_save, f, indent=4)
+                import os
+                os.replace(temp_path, self.stats_filepath)
             except Exception as e:
                 logging.error(f"Error saving cache stats: {e}")
 
@@ -598,6 +601,9 @@ class TypeCPipeline:
                     await w_q.put((idx, row))
                     raise
                 pipeline_logger.error(f"FATAL WORKER ERROR for {row[h_map['domain']] if row else 'Unknown'}: {e}")
+                if self.mode != "phase2":
+                    stat_col = h_map.get("r1", "H")
+                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[f"Fatal Error: {str(e)[:50]}"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 w_q.task_done()

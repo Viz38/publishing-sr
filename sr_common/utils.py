@@ -402,7 +402,7 @@ async def call_tracxn_api(session: aiohttp.ClientSession, url: str, limiter, met
         try:
             await limiter.throttle()
             logging.info(f"TRACXN REQ: {method.upper()} {url} | Payload: {json.dumps(json_data)}")
-            async with session.request(method, url, json=json_data, headers=headers) as response:
+            async with session.request(method, url, json=json_data, headers=headers, timeout=aiohttp.ClientTimeout(total=45)) as response:
                 status = response.status
                 res_data = None
                 try:
