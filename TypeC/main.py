@@ -387,53 +387,63 @@ class TypeCPipeline:
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
 
-        work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-        for idx, row in data_rows:
-            await work_queue.put((idx, row))
-
         cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
             if self.mode == "phase2":
+                work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
+                for idx, row in data_rows:
+                    await work_queue.put((idx, row))
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                 writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
                 await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
             else:
-                while True:
-                    try:
-                        # Ensure system is healthy before launching/relaunching browser
-                        await SystemHealthMonitor(cpu_threshold=90, mem_threshold=90).wait_for_resources(logger=pipeline_logger)
+                batch_size = 300
+                result_queue = asyncio.Queue()
+                writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
+                
+                for batch_idx in range(0, len(data_rows), batch_size):
+                    batch = data_rows[batch_idx:batch_idx + batch_size]
+                    work_queue = asyncio.Queue()
+                    for idx, row in batch:
+                        await work_queue.put((idx, row))
                         
-                        profile = get_browser_profile("windows")
-                        async with AsyncCamoufox(
-                            headless=True,
-                            humanize=True,
-                            block_webrtc=True,
-                            os=profile["os"],
-                            screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
-                            i_know_what_im_doing=True
-                        ) as browser:
-                            tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
-                            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
+                    pipeline_logger.info(f"Starting browser batch {batch_idx//batch_size + 1}/{(len(data_rows) + batch_size - 1)//batch_size} ({len(batch)} domains)")
+                    
+                    while not work_queue.empty():
+                        try:
+                            # Ensure system is healthy before launching/relaunching browser
+                            await SystemHealthMonitor(cpu_threshold=90, mem_threshold=90).wait_for_resources(logger=pipeline_logger)
                             
-                            queue_task = asyncio.create_task(work_queue.join())
-                            done, pending = await asyncio.wait([queue_task] + tasks, return_when=asyncio.FIRST_COMPLETED)
-                            
-                            if queue_task in done:
-                                [t.cancel() for t in tasks]
-                                await result_queue.join()
-                                writer_task.cancel()
-                                break
-                            else:
-                                for p in pending:
-                                    p.cancel()
-                                writer_task.cancel()
-                                for t in done:
-                                    if t != queue_task and t.exception():
-                                        raise t.exception()
-                    except Exception as e:
-                        pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Waiting for resources to restart...")
-                        await asyncio.sleep(5)
-                        await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
+                            profile = get_browser_profile("windows")
+                            async with AsyncCamoufox(
+                                headless=True,
+                                humanize=True,
+                                block_webrtc=True,
+                                os=profile["os"],
+                                screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
+                                i_know_what_im_doing=True
+                            ) as browser:
+                                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                                
+                                queue_task = asyncio.create_task(work_queue.join())
+                                done, pending = await asyncio.wait([queue_task] + tasks, return_when=asyncio.FIRST_COMPLETED)
+                                
+                                if queue_task in done:
+                                    [t.cancel() for t in tasks]
+                                    break
+                                else:
+                                    for p in pending:
+                                        p.cancel()
+                                    for t in done:
+                                        if t != queue_task and t.exception():
+                                            raise t.exception()
+                        except Exception as e:
+                            pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Waiting for resources to restart...")
+                            await asyncio.sleep(5)
+                            await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
+                
+                await result_queue.join()
+                writer_task.cancel()
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map, cache_manager):
         monitor = SystemHealthMonitor()
@@ -442,7 +452,7 @@ class TypeCPipeline:
         while True:
             idx, row = await w_q.get()
             try:
-                await monitor.wait_for_resources(logger=pipeline_logger, timeout=300)
+                await monitor.wait_for_resources(logger=pipeline_logger, timeout=300, fast_fail_ram=True)
                 domain = row[h_map["domain"]]
                 date_str = datetime.now().strftime("%d-%b-%Y")
                 await r_q.put({'range': f"A{idx}", 'values': [[date_str]]})

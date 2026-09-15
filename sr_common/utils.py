@@ -34,13 +34,18 @@ class SystemHealthMonitor:
             return False, f"Memory too high ({mem}%)"
         return True, "Healthy"
 
-    async def wait_for_resources(self, logger=None, timeout=None):
+    async def wait_for_resources(self, logger=None, timeout=None, fast_fail_ram=False):
         """Pauses execution if system resources are saturated. Raises TimeoutError if timeout is reached."""
         start_time = time.time()
         while True:
             healthy, reason = self.is_healthy()
             if healthy:
                 break
+                
+            if fast_fail_ram and "Memory" in reason:
+                if logger:
+                    logger.error(f"HEALTH_GATE: Fast failing on RAM saturation ({reason}) to recycle resources.")
+                raise MemoryError(f"Resource saturation: {reason}")
             
             if timeout is not None and (time.time() - start_time) > timeout:
                 if logger:
@@ -55,6 +60,7 @@ class SystemHealthMonitor:
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
             await asyncio.sleep(5) # Shorter sleep to prevent AppScript timeouts
+
 
 # Load Parked Domain Dictionary
 PARKED_KEYWORDS_STRICT = []
