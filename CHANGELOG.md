@@ -1,3 +1,31 @@
+## [2026-09-15] Eliminate Convoy Bottlenecks, Cascading Waterfall Timeouts, and Worker Starvation
+Files changed:
+- sr_common/fetcher.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- .gitignore
+- Temp_Test/test_fetcher_fast_fail.py
+- Temp_Test/test_browser_manager.py
+- Temp_Test/test_pipeline_streaming.py
+- Temp_Test/test_resource_saturation_recovery.py
+Reason:
+Fixed severe pipeline throughput drop (from 3,000 domains/hr to ~1,000 domains/hr) and edge-case worker stalls observed on Device 811:
+1. Eliminated the Convoy / Straggler Bottleneck: Removed hard 300-domain batch partitioning with `await work_queue.join()` across TypeA, TypeB, and TypeC. Switched to continuous streaming queues where workers pull tasks continuously without idle starvation at batch tails.
+2. Introduced `BrowserManager` with Graceful Delayed Recycling: Implemented lazy AsyncCamoufox initialization and out-of-band context recycling (every 150 navigations or RAM > 88%). Added a 25s grace period for old browser instances before disposal to guarantee in-flight navigations are not aborted mid-stream.
+3. Fast-Fail DNS and Socket Defense in `StealthFetcher`: Automatically detects unresolvable hosts (`curl: (6) Could not resolve host`) and connection refused (`curl: (7)`), immediately aborting in <1s without wasting 4+ minutes cascading through heavy browser fallbacks (Tier 2/3).
+4. Compressed Waterfall Latency: Reduced Tier 0 timeout from 45s to 12s, Tier 2 timeout to 20s (single attempt), Tier 3 to 15s, and capped total fetch timeout at 35s.
+5. Prevented Worker Death on Resource Saturation: Replaced fatal `raise` in worker error handlers across TypeA, TypeB, and TypeC with safe re-queuing and a 5-second backoff. This ensures worker coroutines never terminate during temporary memory or CPU spikes.
+6. Guaranteed Sheet Writer Queue Drainage in TypeA: Aligned TypeA's `_flush_to_sheets` `finally` block with TypeB/C to always call `r_q.task_done()`, preventing `await result_queue.join()` from hanging indefinitely if Google Sheets updates encounter temporary errors.
+7. Bounded Concurrent Sub-Page Fetching in TypeA: Converted sequential sub-page crawling to bounded concurrent `asyncio.gather` with a semaphore of 3 and 15s timeout per page.
+8. Worker Timeout Guards: Added 75s `asyncio.wait_for` timeout guard around Stage 1 domain processing to prevent rogue domain hangs.
+9. Ignored `Temp_Test/` in `.gitignore` per development rules.
+Related tests:
+- Temp_Test/test_fetcher_fast_fail.py
+- Temp_Test/test_browser_manager.py
+- Temp_Test/test_pipeline_streaming.py
+- Temp_Test/test_resource_saturation_recovery.py
+
 ## [2026-09-03] Enhance Stealth Fetcher WAF Evasion and Fallback Logic
 Files changed:
 - sr_common/fetcher.py

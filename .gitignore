@@ -7,10 +7,15 @@ __pycache__/
 .ruff_cache/
 *.log
 *.log*
+*.Logs*
 *.logs
 **/Logs/
 Logs/
+Logs*/
+Logs copy/
 External_Logs/
+*.csv
+!prompt.csv
 .progress.json
 *.json
 !sr_common/*.json
@@ -24,3 +29,4 @@ prompt.csv
 *.zip
 docs/
 Legacy/
+Temp_Test/

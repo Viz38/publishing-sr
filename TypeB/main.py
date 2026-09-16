@@ -29,7 +29,7 @@ from sr_common.utils import (
     update_manual_curation_date
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
-from sr_common.fetcher import StealthFetcher
+from sr_common.fetcher import StealthFetcher, BrowserManager
 from sr_common.supabase_client import fetch_scraped_content
 from sr_common.stealth import get_browser_profile
 
@@ -474,59 +474,28 @@ class TypeBPipeline:
 
         cache_manager = TrackingCacheManager(settings.TYPEB_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
+            work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
+            for item in filtered_data_rows:
+                await work_queue.put(item)
+
+            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeB"))
+
             if self.mode == "phase2":
-                work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
-                for item in filtered_data_rows:
-                    await work_queue.put(item)
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
-                writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeB"))
-                await work_queue.join(); [t.cancel() for t in tasks]; await result_queue.join(); writer_task.cancel()
+                await work_queue.join()
+                for t in tasks: t.cancel()
             else:
-                batch_size = 300
-                result_queue = asyncio.Queue()
-                writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeB"))
-                
-                for batch_idx in range(0, len(filtered_data_rows), batch_size):
-                    batch = filtered_data_rows[batch_idx:batch_idx + batch_size]
-                    work_queue = asyncio.Queue()
-                    for item in batch:
-                        await work_queue.put(item)
-                        
-                    pipeline_logger.info(f"Starting browser batch {batch_idx//batch_size + 1}/{(len(filtered_data_rows) + batch_size - 1)//batch_size} ({len(batch)} domains)")
-                    
-                    while not work_queue.empty():
-                        try:
-                            await SystemHealthMonitor(cpu_threshold=90, mem_threshold=90).wait_for_resources(logger=pipeline_logger)
-                            profile = get_browser_profile("windows")
-                            async with AsyncCamoufox(
-                                headless=True,
-                                humanize=True,
-                                block_webrtc=True,
-                                os=profile["os"],
-                                screen=Screen(max_width=profile["screen_resolution"][0], max_height=profile["screen_resolution"][1]),
-                                i_know_what_im_doing=True
-                            ) as browser:
-                                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
-                                
-                                queue_task = asyncio.create_task(work_queue.join())
-                                done, pending = await asyncio.wait([queue_task] + tasks, return_when=asyncio.FIRST_COMPLETED)
-                                
-                                if queue_task in done:
-                                    [t.cancel() for t in tasks]
-                                    break
-                                else:
-                                    for p in pending:
-                                        p.cancel()
-                                    for t in done:
-                                        if t != queue_task and t.exception():
-                                            raise t.exception()
-                        except Exception as e:
-                            pipeline_logger.error(f"BROWSER ENGINE CRASHED (Leak Recovery): {e}. Restarting browser...")
-                            await asyncio.sleep(5)
-                            await SystemHealthMonitor(cpu_threshold=80, mem_threshold=85).wait_for_resources(logger=pipeline_logger)
-                
-                await result_queue.join()
-                writer_task.cancel()
+                browser_mgr = BrowserManager(max_navigations=150)
+                try:
+                    pipeline_logger.info(f"Starting continuous streaming pipeline for {len(filtered_data_rows)} domains with {CONFIG['MAX_WORKERS']} workers")
+                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser_mgr, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                    await work_queue.join()
+                    for t in tasks: t.cancel()
+                finally:
+                    await browser_mgr.close()
+
+            await result_queue.join()
+            writer_task.cancel()
 
     async def domain_worker(self, w_q, r_q, browser, session, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager):
         monitor = SystemHealthMonitor()
@@ -562,7 +531,15 @@ class TypeBPipeline:
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
-                else: res = await process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager)
+                else:
+                    try:
+                        res = await asyncio.wait_for(
+                            process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager),
+                            timeout=75.0
+                        )
+                    except asyncio.TimeoutError:
+                        pipeline_logger.error(f"DOMAIN TIMEOUT: {domain} exceeded 75s Stage 1 budget")
+                        res = {"type": "error", "reason": "Timeout", "scraper_used": "BU"}
                 
                 if "tokens" in res:
                     is_success = res.get("type") == "success"
@@ -692,14 +669,15 @@ class TypeBPipeline:
                 await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 if "Resource saturation" in str(e):
-                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation.")
+                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off 5s...")
                     await w_q.put((idx, row))
-                    raise
-                pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
-                if self.mode != "phase2":
-                    stat_col = h_map.get("r1", "H")
-                    await r_q.put({'range': f"{stat_col}{idx}", 'values': [[f"Fatal Error: {str(e)[:50]}"]]})
-                await r_q.put({'type': 'progress', 'is_success': False})
+                    await asyncio.sleep(5.0)
+                else:
+                    pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
+                    if self.mode != "phase2":
+                        stat_col = h_map.get("r1", "H")
+                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[f"Fatal Error: {str(e)[:50]}"]]})
+                    await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 w_q.task_done()
 
