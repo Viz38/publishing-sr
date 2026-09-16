@@ -12,9 +12,9 @@ const CONFIG = {
   WORKER_URLS: [
     { name: '4230-TypeC-Pipeline', url: 'https://4230-type-C.ecosuyaenergies.com' },
     { name: '4990-TypeC-Pipeline', url: 'https://4990-type-C.ecosuyaenergies.com' },
+    { name: 'Keshav-TypeC-Pipeline', url: 'https://keshav-Typec-Pipeline.ecosuyaenergies.com' },
     { name: 'Vishnu-TypeC-Pipeline', url: 'https://vishnu-typec.ecosuyaenergies.com' },
-
-    { name: 'Keshav-TypeC-Pipeline', url: 'https://keshav-Typec-Pipeline.ecosuyaenergies.com' }
+    { name: 'Rajath-TypeC-Pipeline', url: 'https://rajath-type-C.ecosuyaenergies.com' }
 
   ],
   AUTH_TOKEN: 'Tracxn@SR',
