@@ -1157,29 +1157,32 @@ class TypeAPipeline:
             if not updates:
                 return
             
-            logging.info(f"SHEET WRITER FLUSHING. Updates: {len(updates)}, Time since flush: {time.time() - last_flush:.1f}s")
             try:
                 def get_row_num(u):
                     m = re.search(r'\d+', u.get('range', ''))
                     return int(m.group()) if m else 0
-                updates.sort(key=get_row_num)
                 
-                for attempt in range(3):
-                    try:
-                        import copy
-                        await asyncio.wait_for(ws.batch_update(copy.deepcopy(updates), value_input_option='USER_ENTERED'), timeout=60)
-                        success = True
-                        break
-                    except asyncio.TimeoutError:
-                        logging.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
-                        await asyncio.sleep(2)
-                    except Exception as e:
-                        logging.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
-                        await asyncio.sleep(2)
-                else:
-                    logging.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts.")
-                
+                # Deduplicate updates, keeping latest update for each range
+                latest_updates = {}
                 for u in updates:
+                    latest_updates[u['range']] = u
+                updates_to_send = list(latest_updates.values())
+                updates_to_send.sort(key=get_row_num)
+                
+                for attempt in range(5):
+                    try:
+                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        logging.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
+                        break
+                    except Exception as e:
+                        if attempt == 4:
+                            logging.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
+                            raise e
+                        sleep_time = (attempt + 1) * 3
+                        logging.warning(f"Flush attempt {attempt+1} failed: {e}. Retrying in {sleep_time}s...")
+                        await asyncio.sleep(sleep_time)
+                
+                for u in updates_to_send:
                     match = re.search(r'\d+', u['range'])
                     if match: processed.add(int(match.group()))
                 

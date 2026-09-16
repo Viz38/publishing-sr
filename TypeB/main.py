@@ -827,25 +827,27 @@ class TypeBPipeline:
                 def get_row_num(u):
                     m = re.search(r'\d+', u.get('range', ''))
                     return int(m.group()) if m else 0
-                updates.sort(key=get_row_num)
-                
-                # Check for duplicate indices
-                seen_ranges = set()
-                deduped_updates = []
+                # Deduplicate updates, keeping latest update for each range
+                latest_updates = {}
                 for u in updates:
-                    if u['range'] not in seen_ranges:
-                        seen_ranges.add(u['range'])
-                        deduped_updates.append(u)
-                    else:
-                        system_logger.warning(f"DUPLICATE RANGE IN BATCH: {u['range']} was dropped from batch.")
+                    latest_updates[u['range']] = u
+                updates_to_send = list(latest_updates.values())
+                updates_to_send.sort(key=get_row_num)
                 
-                # Format before writing
-                if self.apply_formatting:
-                    await self._format_and_write(ws, deduped_updates)
-                else:
-                    await self._raw_write(ws, deduped_updates)
+                for attempt in range(5):
+                    try:
+                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        system_logger.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
+                        break
+                    except Exception as e:
+                        if attempt == 4:
+                            pipeline_logger.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
+                            raise e
+                        sleep_time = (attempt + 1) * 3
+                        pipeline_logger.warning(f"Flush attempt {attempt+1} failed: {e}. Retrying in {sleep_time}s...")
+                        await asyncio.sleep(sleep_time)
                 
-                for u in updates:
+                for u in updates_to_send:
                     match = re.search(r'\d+', u['range'])
                     if match: processed_indices.add(int(match.group()))
                 

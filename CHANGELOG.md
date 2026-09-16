@@ -1,3 +1,26 @@
+## [2026-09-16] Fix Type B Google Sheets Writing & Unify Completed UI Status Signals Across Type A, B, and C
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeA/apps_script.gs
+- TypeB/apps_script.gs
+- TypeC/apps_script.gs
+- Temp_Test/test_sheet_writer_flush.py
+Reason:
+1. Fixed Missing Google Sheets Write Method in Type B:
+   - Root Cause: In `TypeB/main.py`, `_flush_to_sheets` was calling nonexistent methods `self._format_and_write` and `self._raw_write`. This threw an `AttributeError` which was swallowed, causing `updates` to be dropped and leaving Google Sheets completely blank despite the pipeline reporting 100% completion.
+   - Fix: Replaced with latest-update deduplication (`latest_updates[u['range']] = u`), sequential row sorting, and a 5-attempt retry loop on `ws.batch_update(updates_to_send, value_input_option='USER_ENTERED')`.
+2. Upgraded Sheet Writer Deduplication in Type A:
+   - Replaced raw list updates with latest-update range deduplication and 5-attempt retry loop to prevent overlapping range conflicts during Google Sheets API batch updates.
+3. Unified Clear User Status Signals Across Type A, B, and C Apps Script:
+   - Fixed header badge stuck on "Running...": When pipeline succeeds or stops, badge dynamically transitions to "Completed" (green) or "Stopped" (red).
+   - Fixed Idle State Resumption: When checking status after a completed run where the worker has returned to idle, Apps Script recognizes that `progress_current >= progress_total` and cleanly renders "Pipeline Completed" rather than ambiguously displaying "Pipeline Idle" with a "Running..." badge.
+   - Distinct colored states for Running, Paused (Rate Limit), Stopping, Completed, Stopped, Failed, and Idle.
+Related tests:
+- Temp_Test/test_sheet_writer_flush.py
+- Temp_Test/test_decoupled_pipeline.py
+- Temp_Test/test_graceful_stop.py
+
 ## [2026-09-16] Graceful Pipeline Stop, Subprocess Pipe Buffer Deadlock Fix, & Pipeline Hardening
 Files changed:
 - TypeA/main.py
