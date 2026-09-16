@@ -16,7 +16,7 @@ from urllib.parse import urlparse
 from dotenv import load_dotenv
 
 from sr_common.config import settings
-from sr_common.clients import RateLimiter, GoogleSheetsClient
+from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.utils import call_gemini_api, call_tracxn_api, clean_html, extract_descriptions, is_parked_domain, get_dynamic_max_workers, SystemHealthMonitor
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
@@ -100,7 +100,7 @@ async def log_system_metrics():
         await asyncio.sleep(60)
 
 gemini_limiter = RateLimiter(2000)
-tracxn_limiter = RateLimiter(160)
+tracxn_limiter = MultiTierRateLimiter(limits={'second': 95})
 
 async def save_snapshot(domain: str, html: str, reason: str):
     """Saves HTML snapshot for debugging purposes."""

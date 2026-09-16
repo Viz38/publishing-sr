@@ -15,6 +15,7 @@ import json
 import os
 import time
 import psutil
+import signal
 from datetime import datetime
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 from urllib.parse import urlparse
@@ -104,7 +105,7 @@ async def log_system_metrics():
         await asyncio.sleep(60)
 
 gemini_limiter = RateLimiter(2000)
-tracxn_limiter = MultiTierRateLimiter(os.path.join(LOGS_DIR, 'tracxn_rate_limit.db'), {'second': 100, 'minute': 1000, 'hour': 10000, 'day': 100000})
+tracxn_limiter = MultiTierRateLimiter(os.path.join(LOGS_DIR, 'tracxn_rate_limit.db'), {'second': 95})
 
 async def save_snapshot(domain: str, html: str, reason: str):
     """Saves HTML snapshot for debugging purposes."""
@@ -333,12 +334,36 @@ class TypeCPipeline:
         self.mode = mode
         self.config = CONFIG.copy()
         self.apply_formatting = True
+        self.stop_requested = False
+
+    async def _stop_monitor(self, w_q):
+        """Monitors for graceful stop request via SIGTERM or .stop_requested file.
+        When stop is requested, drains work_queue so domain workers stop Stage 1."""
+        while not (self.stop_requested or os.path.exists(".stop_requested")):
+            await asyncio.sleep(0.5)
+        self.stop_requested = True
+        pipeline_logger.warning("GRACEFUL STOP TRIGGERED: Draining unscraped work_queue to halt Stage 1...")
+        while not w_q.empty():
+            try:
+                w_q.get_nowait()
+                w_q.task_done()
+            except (asyncio.QueueEmpty, ValueError):
+                break
 
     async def run(self):
         pipeline_logger.info(f"PIPELINE START: Row {self.start_row} | Mode: {self.mode}")
         self.report_progress(0, 0, 0, 0)
         # Start system monitoring
         asyncio.create_task(log_system_metrics())
+
+        loop = asyncio.get_running_loop()
+        def _on_sigterm():
+            pipeline_logger.warning("SIGTERM RECEIVED: Initiating graceful stop...")
+            self.stop_requested = True
+        try:
+            loop.add_signal_handler(signal.SIGTERM, _on_sigterm)
+        except (NotImplementedError, RuntimeError):
+            pass
         
         while True:
             try:
@@ -389,35 +414,91 @@ class TypeCPipeline:
 
         cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY)
         async with aiohttp.ClientSession() as session:
-            work_queue, result_queue = asyncio.Queue(), asyncio.Queue()
+            work_queue, result_queue, tracxn_queue = asyncio.Queue(), asyncio.Queue(), asyncio.Queue()
             for idx, row in data_rows:
                 await work_queue.put((idx, row))
 
-            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC"))
+            stop_monitor_task = asyncio.create_task(self._stop_monitor(work_queue))
+            writer_task = asyncio.create_task(self.sheet_writer(result_queue, ws, len(data_rows), gc, "TypeC", tracxn_queue))
+            heartbeat_task = asyncio.create_task(self.heartbeat_reporter(tracxn_queue))
+            tracxn_workers = [
+                asyncio.create_task(self.tracxn_worker(tracxn_queue, result_queue, session))
+                for _ in range(5)
+            ]
 
             if self.mode == "phase2":
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                 await work_queue.join()
                 for t in tasks: t.cancel()
             else:
                 browser_mgr = BrowserManager(max_navigations=150)
                 try:
                     pipeline_logger.info(f"Starting continuous streaming pipeline for {len(data_rows)} domains with {CONFIG['MAX_WORKERS']} workers")
-                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, browser_mgr, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                     await work_queue.join()
                     for t in tasks: t.cancel()
                 finally:
                     await browser_mgr.close()
 
+            if self.mode != "phase1":
+                pipeline_logger.info(f"Draining Tracxn queue ({tracxn_queue.qsize()} pending)...")
+                await tracxn_queue.join()
+            for t in tracxn_workers:
+                t.cancel()
+
             await result_queue.join()
             writer_task.cancel()
+            heartbeat_task.cancel()
+            stop_monitor_task.cancel()
+            if os.path.exists(".stop_requested"):
+                try:
+                    os.remove(".stop_requested")
+                except Exception:
+                    pass
 
-    async def domain_worker(self, w_q, r_q, browser, session, prompts, f_ids, h_map, cache_manager):
+    async def heartbeat_reporter(self, t_q):
+        """Background task updating rate limit sleep countdown and backlog in .progress.json every second."""
+        while True:
+            try:
+                pause_info = tracxn_limiter.get_pause_status()
+                current_data = {"current": 0, "total": 0, "success": 0, "fail": 0}
+                if os.path.exists(".progress.json"):
+                    try:
+                        with open(".progress.json", "r") as f:
+                            current_data = json.load(f)
+                    except Exception:
+                        pass
+                
+                current_data["backlog"] = t_q.qsize() if t_q else 0
+                current_data["rate_limit_paused"] = pause_info["paused"]
+                current_data["sleep_remaining_sec"] = pause_info["remaining"]
+                current_data["rate_limit_message"] = pause_info["message"]
+                current_data["is_stopping"] = self.stop_requested or os.path.exists(".stop_requested")
+                
+                tmp_file = f".progress.json.tmp.{os.getpid()}"
+                with open(tmp_file, "w") as f:
+                    json.dump(current_data, f)
+                os.replace(tmp_file, ".progress.json")
+            except Exception:
+                pass
+            await asyncio.sleep(1.0)
+
+    async def domain_worker(self, w_q, r_q, t_q, browser, session, prompts, f_ids, h_map, cache_manager):
         monitor = SystemHealthMonitor()
         import random
         await asyncio.sleep(random.uniform(1.0, 5.0))
         while True:
-            idx, row = await w_q.get()
+            if self.stop_requested or os.path.exists(".stop_requested"):
+                pipeline_logger.info("STOP INITIATED: Domain worker halting Stage 1.")
+                break
+            try:
+                idx, row = await asyncio.wait_for(w_q.get(), timeout=1.0)
+            except asyncio.TimeoutError:
+                if w_q.empty():
+                    break
+                continue
+
+            domain = row[h_map["domain"]] if row and "domain" in h_map and len(row) > h_map["domain"] else "Unknown"
             try:
                 await monitor.wait_for_resources(logger=pipeline_logger, timeout=300, fast_fail_ram=True)
                 domain = row[h_map["domain"]]
@@ -486,100 +567,19 @@ class TypeCPipeline:
                         await r_q.put({'range': f"S{idx}", 'values': [[scraper_used]]})
 
                 if self.mode != "phase1":
-                    pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
-                    dp_id = row[h_map["dp_id"]]
-                    funnel_id = row[h_map["funnel_id"]]
-                    
-                    async def update_dp():
-                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                        if not feed_id:
-                            return 200, None
-                            
-                        sd = res.get("sd") if is_success else None
-                        ld = res.get("ld") if is_success else None
-                        if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
-                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
-                            tags = hashtags + ["bu_llm_typec_autopublish", "bu_llm_sd_ld"]
-                            payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
-                            
-                            company_name = res.get("company_name", "").strip()
-                            if company_name:
-                                payload["companyName"] = {"value": company_name}
-                                
-                            try:
-                                eh_status, eh_res = await call_tracxn_api(
-                                    session, 
-                                    f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
-                                    tracxn_limiter, method="get", headers=HEADERS
-                                )
-                                if eh_status == 200 and isinstance(eh_res, list):
-                                    for item in eh_res:
-                                        a_name = item.get("attributeName")
-                                        if a_name in ("foundedYear", "companyLocation") and item.get("createdBy") == "publish.edits@tracxn.com":
-                                            payload[a_name] = {"value": None}
-                                            pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
-                            except Exception as eh_err:
-                                pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
-                                
-                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=payload, headers=HEADERS)
-                        return 200, None
-                        
-                    async def update_bm():
-                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                        if feed_id:
-                            return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": dp_id}, "opType": "Update"}, headers=HEADERS)
-                        return 200, None
-                        
-                    async def update_funnel(feed_status):
-                        feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                        f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "64197f01a6dcff6572453ead"
-                        As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                        if As in (200, 201):
-                            if f_id_to_move == "5dc586332799a51cc0ff2e36" and feed_status != 422:
-                                await update_manual_curation_date(session, dp_id, tracxn_limiter, HEADERS)
-                            ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                            if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
-                                ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                                return ms2
-                            return ms
-                        return "Assign Failed"
-                        
-                    (s1, _), (s_f, _) = await asyncio.gather(update_dp(), update_bm())
-                    ms = await update_funnel(s_f)
-                    
-                    fail_reason = res.get('reason', 'Failed') if not is_success else ''
-                    
-                    if is_success:
-                        not_updated_text = "NotUpdated"
-                    elif fail_reason in ("Low Content", "Low content"):
-                        not_updated_text = "Low Content"
-                    elif fail_reason == "Parked":
-                        not_updated_text = "Parked"
-                    elif fail_reason.startswith("Missing"):
-                        not_updated_text = "Irrelevant"
-                    elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
-                        not_updated_text = "NotUpdated"
-                    else:
-                        not_updated_text = "Irrelevant"
-                    
-                    sd = res.get("sd") if is_success else None
-                    ld = res.get("ld") if is_success else None
-                    if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
-                        sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
-                    else:
-                        sdld = not_updated_text
-                        
-                    feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
-                    if feed_id:
-                        f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
-                        fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                    else:
-                        f_stat = "N/A"
-                        fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
-                    
-                    await r_q.put({'range': f"K{idx}:N{idx}", 'values': [[feed_id, sdld, f_stat, fun]]})
-                    
-                await r_q.put({'type': 'progress', 'is_success': is_success})
+                    # Memory optimization: release large raw scraped HTML/text before passing to Tracxn queue
+                    res.pop("raw_data", None)
+                    await t_q.put({
+                        'idx': idx,
+                        'row': row,
+                        'res': res,
+                        'is_success': is_success,
+                        'is_full_success': is_full_success,
+                        'h_map': h_map,
+                        'f_ids': f_ids
+                    })
+                else:
+                    await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 if "Resource saturation" in str(e):
                     pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off 5s...")
@@ -594,7 +594,125 @@ class TypeCPipeline:
             finally:
                 w_q.task_done()
 
-    async def sheet_writer(self, r_q, ws, total, gc, pipeline_name):
+    async def tracxn_worker(self, t_q, r_q, session):
+        """Asynchronous worker dedicated to Tracxn API updates.
+        Pulls from t_q, processes updates, and handles rate limit cooldowns
+        without blocking web scraping or LLM operations."""
+        while True:
+            item = await t_q.get()
+            try:
+                idx = item['idx']
+                row = item['row']
+                res = item['res']
+                is_success = item['is_success']
+                is_full_success = item['is_full_success']
+                h_map = item['h_map']
+                f_ids = item['f_ids']
+                domain = row[h_map["domain"]]
+
+                pipeline_logger.info(f"PIPELINE: Updating Tracxn for {domain}")
+                dp_id = row[h_map["dp_id"]]
+                funnel_id = row[h_map["funnel_id"]]
+                
+                async def update_dp():
+                    feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                    if not feed_id:
+                        return 200, None
+                        
+                    sd = res.get("sd") if is_success else None
+                    ld = res.get("ld") if is_success else None
+                    if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
+                        hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else []
+                        tags = hashtags + ["bu_llm_typec_autopublish", "bu_llm_sd_ld"]
+                        payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
+                        
+                        company_name = res.get("company_name", "").strip()
+                        if company_name:
+                            payload["companyName"] = {"value": company_name}
+                            
+                        try:
+                            eh_status, eh_res = await call_tracxn_api(
+                                session, 
+                                f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
+                                tracxn_limiter, method="get", headers=HEADERS
+                            )
+                            if eh_status == 200 and isinstance(eh_res, list):
+                                for item_eh in eh_res:
+                                    a_name = item_eh.get("attributeName")
+                                    if a_name in ("foundedYear", "companyLocation") and item_eh.get("createdBy") == "publish.edits@tracxn.com":
+                                        payload[a_name] = {"value": None}
+                                        pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
+                        except Exception as eh_err:
+                            pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                            
+                        return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=payload, headers=HEADERS)
+                    return 200, None
+                    
+                async def update_bm():
+                    feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                    if feed_id:
+                        return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/3.0/w/theme-company-association", tracxn_limiter, method="put", json_data={"object": {"themeId": feed_id, "status": "PUBLISHED", "companyId": dp_id}, "opType": "Update"}, headers=HEADERS)
+                    return 200, None
+                    
+                async def update_funnel(feed_status):
+                    feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                    f_id_to_move = "5dc586332799a51cc0ff2e36" if feed_id else "64197f01a6dcff6572453ead"
+                    As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                    if As in (200, 201):
+                        if f_id_to_move == "5dc586332799a51cc0ff2e36" and feed_status != 422:
+                            await update_manual_curation_date(session, dp_id, tracxn_limiter, HEADERS)
+                        ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                        if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
+                            ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
+                            return ms2
+                        return ms
+                    return "Assign Failed"
+                    
+                (s1, _), (s_f, _) = await asyncio.gather(update_dp(), update_bm())
+                ms = await update_funnel(s_f)
+                
+                fail_reason = res.get('reason', 'Failed') if not is_success else ''
+                
+                if is_success:
+                    not_updated_text = "NotUpdated"
+                elif fail_reason in ("Low Content", "Low content"):
+                    not_updated_text = "Low Content"
+                elif fail_reason == "Parked":
+                    not_updated_text = "Parked"
+                elif fail_reason.startswith("Missing"):
+                    not_updated_text = "Irrelevant"
+                elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
+                    not_updated_text = "NotUpdated"
+                else:
+                    not_updated_text = "Irrelevant"
+                
+                sd = res.get("sd") if is_success else None
+                ld = res.get("ld") if is_success else None
+                if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
+                    sdld = "Done" if s1 in (200, 201) else ("Duplicate/Already Moved" if s1 == 422 else ("Funnel State Conflicts" if s1 == 400 else f"Err {s1}"))
+                else:
+                    sdld = not_updated_text
+                    
+                feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
+                if feed_id:
+                    f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
+                    fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
+                else:
+                    f_stat = "N/A"
+                    fun = "Sent discovery" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
+                
+                await r_q.put({'range': f"K{idx}:N{idx}", 'values': [[feed_id, sdld, f_stat, fun]]})
+                await r_q.put({'type': 'progress', 'is_success': is_success})
+            except Exception as e:
+                d_idx = h_map.get('domain', 0) if isinstance(h_map, dict) else 0
+                row_data = item.get('row')
+                err_domain = row_data[d_idx] if isinstance(row_data, list) and len(row_data) > d_idx else 'unknown'
+                pipeline_logger.error(f"TRACXN WORKER ERROR for {err_domain}: {e}")
+                await r_q.put({'type': 'progress', 'is_success': False})
+            finally:
+                t_q.task_done()
+
+    async def sheet_writer(self, r_q, ws, total, gc, pipeline_name, t_q=None):
         processed_indices, success, fail = set(), 0, 0
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         updates = []
@@ -618,28 +736,34 @@ class TypeCPipeline:
             try:
                 def get_row_num(u):
                     m = re.search(r'\d+', u.get('range', ''))
-                    return int(m.group()) if m else 0
-                updates.sort(key=get_row_num)
+                    return int(m.group(0)) if m else 0
                 
-                for attempt in range(3):
+                # Deduplicate updates
+                latest_updates = {}
+                for u in updates:
+                    latest_updates[u['range']] = u
+                updates_to_send = list(latest_updates.values())
+                updates_to_send.sort(key=get_row_num)
+                
+                for attempt in range(5):
                     try:
-                        import copy
-                        await asyncio.wait_for(ws.batch_update(copy.deepcopy(updates), value_input_option='USER_ENTERED'), timeout=60)
+                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        system_logger.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
                         break
-                    except asyncio.TimeoutError:
-                        pipeline_logger.warning(f"Google Sheets timeout on attempt {attempt+1}/3. Retrying...")
-                        await asyncio.sleep(2)
                     except Exception as e:
-                        pipeline_logger.warning(f"Google Sheets error on attempt {attempt+1}/3: {e}. Retrying...")
-                        await asyncio.sleep(2)
-                else:
-                    pipeline_logger.error("SHEET WRITER ERR: Failed to update Google Sheets after 3 attempts.")
+                        if attempt == 4:
+                            pipeline_logger.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
+                            raise e
+                        sleep_time = (attempt + 1) * 5
+                        pipeline_logger.warning(f"Flush attempt {attempt+1} failed: {e}. Retrying in {sleep_time}s...")
+                        await asyncio.sleep(sleep_time)
                 
                 for u in updates:
                     match = re.search(r'\d+', u['range'])
                     if match: processed_indices.add(int(match.group()))
                 
-                if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
+                if (batch_in or batch_out or batch_calls):
+                    b_in, b_out, b_think, b_rows, b_calls = batch_in, batch_out, batch_think, batch_rows, batch_calls
                     async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
                         try:
                             t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
@@ -660,7 +784,7 @@ class TypeCPipeline:
                         except Exception as e:
                             pipeline_logger.error(f"TRACKING SHEET ERR: {e}")
                     
-                    asyncio.create_task(_update_tracking(batch_in, batch_out, batch_think, batch_rows, batch_calls))
+                    asyncio.create_task(_update_tracking(b_in, b_out, b_think, b_rows, b_calls))
                     batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
             except Exception as e:
                 pipeline_logger.error(f"SHEET WRITER ERR: {e}")
@@ -669,7 +793,7 @@ class TypeCPipeline:
                 updates = []
                 last_flush = time.time()
                 current_completed = success + fail
-                self.report_progress(current_completed, total, success, fail)
+                self.report_progress(current_completed, total, success, fail, backlog=(t_q.qsize() if t_q else 0))
                 pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")
 
         try:
@@ -711,20 +835,35 @@ class TypeCPipeline:
                                 system_logger.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
                 
                 time_since_flush = time.time() - last_flush
-                if updates and (len(updates) >= 10 or time_since_flush > 10 or (success + fail) == total):
+                if updates and (len(updates) >= 10 or time_since_flush > 5 or (success + fail) == total or self.stop_requested or r_q.empty()):
                     await _flush_to_sheets()
                 else:
                     current_completed = success + fail
-                    self.report_progress(current_completed, total, success, fail)
+                    self.report_progress(current_completed, total, success, fail, backlog=(t_q.qsize() if t_q else 0))
         except asyncio.CancelledError:
             pipeline_logger.info("Sheet writer cancelled, flushing remaining updates...")
             if updates:
                 await _flush_to_sheets()
             raise
 
-    def report_progress(self, curr, total, success, fail):
+    def report_progress(self, curr, total, s, f, backlog=0):
         try:
-            with open(".progress.json", "w") as f: json.dump({"current": curr, "total": total, "success": success, "fail": fail}, f)
+            pause_info = tracxn_limiter.get_pause_status()
+            data = {
+                "current": curr,
+                "total": total,
+                "success": s,
+                "fail": f,
+                "backlog": backlog,
+                "rate_limit_paused": pause_info["paused"],
+                "sleep_remaining_sec": pause_info["remaining"],
+                "rate_limit_message": pause_info["message"],
+                "is_stopping": self.stop_requested or os.path.exists(".stop_requested")
+            }
+            tmp_file = f".progress.json.tmp.{os.getpid()}"
+            with open(tmp_file, "w") as file:
+                json.dump(data, file)
+            os.replace(tmp_file, ".progress.json")
         except: pass
 
 async def main():

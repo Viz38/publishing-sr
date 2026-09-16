@@ -423,6 +423,30 @@ async def call_tracxn_api(session: aiohttp.ClientSession, url: str, limiter, met
                 if status in (422, 400, 401, 404):
                     return status, res_data
                 
+                # Confirmed rate limiting from API response
+                is_rate_limit = (status == 429) or (
+                    status == 403 and res_data and any(
+                        kw in str(res_data).lower() for kw in ["rate limit", "too many requests", "throttle"]
+                    )
+                )
+                if is_rate_limit:
+                    retry_after = response.headers.get("Retry-After")
+                    sleep_duration = 60.0
+                    if retry_after:
+                        try:
+                            sleep_duration = min(float(retry_after), 60.0)
+                        except (ValueError, TypeError):
+                            sleep_duration = 60.0
+                    sleep_duration = max(0.1, min(sleep_duration, 60.0))
+                    logging.warning(
+                        f"TRACXN RATE LIMIT CONFIRMED (Status {status}): Putting key to sleep for {sleep_duration:.1f}s"
+                    )
+                    if hasattr(limiter, 'pause'):
+                        limiter.pause(sleep_duration, message=f"Tracxn API Rate Limit (HTTP {status}) hit. Paused for cooldown.")
+                    await asyncio.sleep(sleep_duration)
+                    attempt += 1
+                    continue
+
                 wait = min(2 * (2**attempt), 60)
                 await asyncio.sleep(wait)
                 attempt += 1

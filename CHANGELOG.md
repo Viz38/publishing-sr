@@ -1,3 +1,86 @@
+## [2026-09-16] Graceful Pipeline Stop, Subprocess Pipe Buffer Deadlock Fix, & Pipeline Hardening
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- TypeA/api.py
+- TypeB/api.py
+- TypeC/api.py
+- TypeA/apps_script.gs
+- TypeB/apps_script.gs
+- TypeC/apps_script.gs
+- Temp_Test/test_graceful_stop.py
+Reason:
+1. Graceful Pipeline Stop & Zero Work Loss:
+   - Implemented clean stop orchestration: when cancellation is requested, Stage 1 (web scraping and Gemini LLM inference) halts immediately, unscraped domains are drained from `work_queue`, and all already-scraped domains in `tracxn_queue` are fully processed by Tracxn workers and written to Google Sheets.
+   - Handled via `signal.SIGTERM` and `.stop_requested` file sentinel monitored by `_stop_monitor` in `main.py`.
+2. Fixed Subprocess Pipe Buffer Deadlock:
+   - Root Cause: `api.py` spawned `main.py` using `stdout=PIPE, stderr=PIPE` without draining them during process execution. When library warnings or errors exceeded the 64KB OS kernel pipe buffer, the subprocess deadlocked on `write()`.
+   - Fix: Redirected subprocess `stdout` and `stderr` directly to `LOGS_DIR/stdout.log` and `LOGS_DIR/stderr.log`.
+3. Two-Tier Apps Script Stop UI:
+   - Updated Apps Script modal dialogs across Type A, B, and C:
+     - On first click: UI button switches to `⏹️ Stopping (Click for Force Kill)`, status text displays `Stopping Stage 1... Draining X pending Tracxn updates to sheet...`, and modal stays open until completion.
+     - On second click: Sends force kill (`SIGKILL`) if an emergency stop is desired.
+     - Once drained, displays `⏹️ Pipeline stopped cleanly. All scraped domains and pending Tracxn updates saved to sheet.` with final metrics.
+4. Robustness & Bug Fixes:
+   - Fixed `UnboundLocalError` in `domain_worker`: pre-bound `domain` before `monitor.wait_for_resources()`.
+   - Fixed `AttributeError` in `tracxn_worker`: replaced invalid `.get()` call on `row` list with safe list index retrieval.
+   - Fixed `.progress.json` race condition: atomic write using `.progress.json.tmp.{pid}` and `os.replace` to eliminate zero-byte truncation reads by `api.py`.
+   - Memory optimization: pruned large `raw_data` strings from `res` before pushing into `tracxn_queue` to reduce RAM footprint during backlog build-up.
+Related tests:
+- Temp_Test/test_graceful_stop.py
+- Temp_Test/test_decoupled_pipeline.py
+- Temp_Test/test_rate_limiter.py
+
+## [2026-09-16] Asynchronous Tracxn API Decoupling & Apps Script Live Rate Limit Countdown
+Files changed:
+- sr_common/clients.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- TypeA/api.py
+- TypeB/api.py
+- TypeC/api.py
+- TypeA/apps_script.gs
+- TypeB/apps_script.gs
+- TypeC/apps_script.gs
+- Temp_Test/test_decoupled_pipeline.py
+Reason:
+1. Asynchronous Queue Decoupling for Stage 1 vs Stage 2:
+   - Decoupled Web Scraping & Gemini LLM inferences (Stage 1) from Tracxn API writes (Stage 2) using `tracxn_queue` across TypeA, TypeB, and TypeC.
+   - When Tracxn API returns HTTP 429 and enters a cooldown sleep (up to 60s), domain scraping and LLM generation do NOT halt. Completed Stage 1 results are buffered in `tracxn_queue`.
+   - A dedicated pool of 5 Tracxn workers pauses during the cooldown, then rapidly drains the accumulated backlog at up to 95 req/sec before resuming live parallel operations.
+2. Apps Script Live Sleep Countdown & Error Display:
+   - Updated modal UI in `TypeA/apps_script.gs`, `TypeB/apps_script.gs`, and `TypeC/apps_script.gs` to display an amber alert banner showing the exact rate limit error message (HTTP 429) and a live 1-second countdown ticker.
+   - Progress bar turns amber during pause, and cleanly resumes blue (`#2563eb`) with progress percentage once sleep finishes.
+   - Polling triggers immediately when the client countdown reaches 0 to resume progress tracking without latency.
+3. Observability & Status Heartbeat:
+   - Added `get_pause_status()` to `MultiTierRateLimiter` and `RateLimiter` exposing `paused`, `remaining`, and `message`.
+   - Introduced a 1-second `heartbeat_reporter` in `main.py` ensuring `.progress.json` continually publishes remaining cooldown seconds and queue backlog count even while workers sleep.
+   - Updated `/status` in `api.py` to serialize `rate_limit_paused`, `sleep_remaining_sec`, `rate_limit_message`, and `backlog`.
+Related tests:
+- Temp_Test/test_decoupled_pipeline.py
+- Temp_Test/test_rate_limiter.py
+
+## [2026-09-16] Fix Pipeline Stall at ~2,400 Domains: MultiTierRateLimiter Re-architecture and 95/sec Throttle
+Files changed:
+- sr_common/clients.py
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- TypeB/manual.py
+- Temp_Test/test_rate_limiter.py
+Reason:
+Resolved the 5+ minute pipeline freeze observed after processing ~2,400 domains (stopping at domain 2,419 / row 2,429 in Logs-811-TypeB):
+1. Root Cause Identification: Analysis of Logs-811-TypeB/api.logs proved that exactly 10,000 Tracxn API requests occurred between 10:00:00 and 10:59:58 (at ~3,200 domains/hr throughput, ~4.15 calls/domain). The 10,000th call hit an obsolete hardcoded client-side hourly limit ('hour': 10000).
+2. Eliminated Lock Contention & Silent Freeze in MultiTierRateLimiter: MultiTierRateLimiter was sleeping inside `async with self.lock:`, locking all workers out of the limiter for 15.8 minutes without any logging. Re-architected throttle() to acquire `self.lock` only during deque inspection and pruning, releasing the lock before sleeping.
+3. Added Debounced Observability Logging: Throttling events now emit clear warnings (debounced to at most once per 10s per window) so rate-limit throttling is never silent.
+4. Clean Rate Limit Configuration: Removed artificial 'hour' and 'day' limits per user specification. Configured Tracxn limiter to solely enforce 95 calls/second across TypeA, TypeB, TypeC, and TypeB/manual.py (safely under Tracxn Platform's 98 req/sec limit).
+5. Confirmed API Rate-Limit Key Sleep (HTTP 429): Added a `pause(seconds)` mechanism to MultiTierRateLimiter and RateLimiter. When and only when Tracxn API returns a confirmed rate-limit response (HTTP 429 or 403 rate-limit message), `call_tracxn_api` parses the `Retry-After` header (or defaults to 60s), caps it at 60 seconds, and pauses all worker requests for that key until the cooldown window expires.
+Related tests:
+- Temp_Test/test_rate_limiter.py
+
 ## [2026-09-15] Eliminate Convoy Bottlenecks, Cascading Waterfall Timeouts, and Worker Starvation
 Files changed:
 - sr_common/fetcher.py

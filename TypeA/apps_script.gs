@@ -12,9 +12,10 @@ const CONFIG = {
     { name: '4230-TypeA-Pipeline', url: 'https://4230-type-A.ecosuyaenergies.com' },
     { name: '4990-TypeA-Pipeline', url: 'https://4990-type-A.ecosuyaenergies.com' },
     { name: 'Rajath-TypeA-Pipeline', url: 'https://rajath-type-A.ecosuyaenergies.com' },
-    { name: 'Vishnu-TypeA-Pipeline', url: 'https://vishnu-typea.ecosuyaenergies.com' }
+    { name: 'Vishnu-TypeA-Pipeline', url: 'https://vishnu-typea.ecosuyaenergies.com' },
+    { name: 'Keshav-TypeA-Pipeline', url: 'https://keshav-Typea-Pipeline.ecosuyaenergies.com' }
   ],
-  AUTH_TOKEN: 'YOUR_SECRET_TOKEN',
+  AUTH_TOKEN: 'Tracxn@SR',
   DEFAULT_MODE: 'full',
   MAX_RETRIES: 3,
   ACTIVE_WORKER_PROP: 'TYPEA_ACTIVE_WORKER'
@@ -109,6 +110,7 @@ function uiStartRun(resumeOnly = false) {
   htmlContent += '<span id="yield-text" style="color:#10b981;">0 Successful</span>';
   htmlContent += '</div>';
   htmlContent += '<div id="worker-info-progress" style="font-size:13px;color:#64748b;text-align:center;margin-top:12px;"></div>';
+  htmlContent += '<div id="ratelimit-banner" style="display:none;background:#fef3c7;border:1px solid #fcd34d;border-radius:10px;padding:12px;margin-top:12px;font-size:12px;color:#92400e;text-align:center;"></div>';
   htmlContent += '</div>';
 
   htmlContent += '<div id="completion-info" style="display:none;background:#f0fdf4;border:1px solid #86efac;border-radius:10px;padding:16px;text-align:center;margin-top:20px;">';
@@ -117,12 +119,12 @@ function uiStartRun(resumeOnly = false) {
   htmlContent += '</div>';
 
   htmlContent += '<div style="display:flex;gap:10px;margin-top:24px;">';
-  htmlContent += '<button onclick="cancelRun()" style="flex:1;padding:12px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-weight:600;cursor:pointer;">⏹️ Stop Pipeline</button>';
+  htmlContent += '<button id="stop-btn" onclick="cancelRun()" style="flex:1;padding:12px;background:#fee2e2;color:#b91c1c;border:1px solid #fecaca;border-radius:8px;font-weight:600;cursor:pointer;">⏹️ Stop Pipeline</button>';
   htmlContent += '<button onclick="google.script.host.close()" style="flex:1;padding:12px;background:white;color:#475569;border:1px solid #cbd5e1;border-radius:8px;font-weight:600;cursor:pointer;">Close</button>';
   htmlContent += '</div></div>';
 
   htmlContent += '<script>';
-  htmlContent += 'let pollTimer; let workersList = []; const isResuming = ' + isResuming + ';';
+  htmlContent += 'let pollTimer; let countdownTimer = null; let currentRemainingSec = 0; let currentLimitMsg = ""; let isStopping = false; let workersList = []; const isResuming = ' + isResuming + ';';
 
   htmlContent += 'function fitHeight(){setTimeout(()=>google.script.host.setHeight(Math.max(document.body.scrollHeight+60,380)),150);}';
 
@@ -170,17 +172,97 @@ function uiStartRun(resumeOnly = false) {
   htmlContent += 'function startPolling(){pollProgress(); pollTimer=setInterval(pollProgress,4000);}';
   htmlContent += 'function pollProgress(){google.script.run.withSuccessHandler(updateProgressUI).getStatusJson();}';
 
-  htmlContent += 'function updateProgressUI(s){if(!s)return;const pct=s.progress_total>0?Math.round((s.progress_current/s.progress_total)*100):0;';
-  htmlContent += 'document.getElementById("progress-fill").style.width=pct+"%";';
-  htmlContent += 'document.getElementById("status-text").textContent=s.active?"Processing rows...":"Pipeline Idle";';
-  htmlContent += 'document.getElementById("count-text").textContent=s.progress_current+" / "+s.progress_total+" rows";';
-  htmlContent += 'document.getElementById("yield-text").textContent=s.progress_success+" Successful";';
-  htmlContent += 'document.getElementById("worker-info-progress").innerHTML="Worker: <strong>"+(s.workerName||"Unknown")+"</strong>";';
-  htmlContent += 'if(!s.active&&s.status!=="running"&&s.status!=="idle"){clearInterval(pollTimer);';
-  htmlContent += 'document.getElementById("completion-info").style.display="block";';
-  htmlContent += 'document.getElementById("completion-msg").textContent=s.status||"Pipeline finished successfully.";fitHeight();}}';
+  htmlContent += 'function renderRateLimitUI(){';
+  htmlContent += '  const rlBanner = document.getElementById("ratelimit-banner");';
+  htmlContent += '  const sText = document.getElementById("status-text");';
+  htmlContent += '  const pFill = document.getElementById("progress-fill");';
+  htmlContent += '  if(currentRemainingSec > 0){';
+  htmlContent += '    rlBanner.style.display = "block";';
+  htmlContent += '    rlBanner.innerHTML = "⚠️ <strong>Tracxn API Rate Limited</strong><br><div style=\\"font-size:11px;color:#b45309;font-weight:600;margin:3px 0;word-break:break-word;\\">" + (currentLimitMsg || "HTTP 429 Too Many Requests") + "</div>Pausing API requests for <strong>" + currentRemainingSec + "s</strong> before resuming.<br><span style=\\"font-size:11px;color:#a16207;\\">Scraping & LLM operations continue running in background.</span>";';
+  htmlContent += '    sText.innerHTML = "⏸️ Paused for API cooldown (" + currentRemainingSec + "s remaining)...";';
+  htmlContent += '    pFill.style.background = "#f59e0b";';
+  htmlContent += '  } else {';
+  htmlContent += '    rlBanner.style.display = "none";';
+  htmlContent += '    pFill.style.background = "#2563eb";';
+  htmlContent += '    sText.textContent = "Resuming API operations (clearing backlog)...";';
+  htmlContent += '  }';
+  htmlContent += '  fitHeight();';
+  htmlContent += '}';
 
-  htmlContent += 'function cancelRun(){google.script.run.executeCancelFromUi();google.script.host.close();}';
+  htmlContent += 'function tickCountdown(){';
+  htmlContent += '  if(currentRemainingSec > 0){';
+  htmlContent += '    currentRemainingSec--;';
+  htmlContent += '    renderRateLimitUI();';
+  htmlContent += '    if(currentRemainingSec === 0){';
+  htmlContent += '      clearInterval(countdownTimer);';
+  htmlContent += '      countdownTimer = null;';
+  htmlContent += '      pollProgress();';
+  htmlContent += '    }';
+  htmlContent += '  }';
+  htmlContent += '}';
+
+  htmlContent += 'function updateProgressUI(s){';
+  htmlContent += '  if(!s) return;';
+  htmlContent += '  const pct = s.progress_total > 0 ? Math.round((s.progress_current / s.progress_total) * 100) : 0;';
+  htmlContent += '  const pFill = document.getElementById("progress-fill");';
+  htmlContent += '  const sText = document.getElementById("status-text");';
+  htmlContent += '  const rlBanner = document.getElementById("ratelimit-banner");';
+  htmlContent += '  const stopBtn = document.getElementById("stop-btn");';
+  htmlContent += '  if(s.is_stopping || s.status === "stopping"){';
+  htmlContent += '    isStopping = true;';
+  htmlContent += '    if(stopBtn && stopBtn.textContent !== "⚡ Force Killing..."){';
+  htmlContent += '      stopBtn.textContent = "⏹️ Stopping (Click for Force Kill)";';
+  htmlContent += '    }';
+  htmlContent += '    const backlogCount = s.backlog || 0;';
+  htmlContent += '    sText.innerHTML = "⏳ <strong>Stopping Stage 1...</strong><br><span style=\\"font-size:12px;color:#b45309;\\">Draining " + backlogCount + " pending Tracxn updates to sheet...</span>";';
+  htmlContent += '    pFill.style.background = "#f59e0b";';
+  htmlContent += '    pFill.style.width = pct + "%";';
+  htmlContent += '  } else if(s.rate_limit_paused && s.sleep_remaining_sec > 0){';
+  htmlContent += '    currentRemainingSec = Math.ceil(s.sleep_remaining_sec);';
+  htmlContent += '    currentLimitMsg = s.rate_limit_message || "HTTP 429 Too Many Requests";';
+  htmlContent += '    pFill.style.width = pct + "%";';
+  htmlContent += '    renderRateLimitUI();';
+  htmlContent += '    if(!countdownTimer){ countdownTimer = setInterval(tickCountdown, 1000); }';
+  htmlContent += '  } else {';
+  htmlContent += '    currentRemainingSec = 0;';
+  htmlContent += '    if(countdownTimer){ clearInterval(countdownTimer); countdownTimer = null; }';
+  htmlContent += '    rlBanner.style.display = "none";';
+  htmlContent += '    pFill.style.background = "#2563eb";';
+  htmlContent += '    pFill.style.width = pct + "%";';
+  htmlContent += '    sText.textContent = s.active ? (s.backlog > 0 ? "Processing rows (clearing " + s.backlog + " backlog)..." : "Processing rows...") : "Pipeline Idle";';
+  htmlContent += '  }';
+  htmlContent += '  document.getElementById("count-text").textContent = s.progress_current + " / " + s.progress_total + " rows";';
+  htmlContent += '  document.getElementById("yield-text").textContent = s.progress_success + " Successful";';
+  htmlContent += '  document.getElementById("worker-info-progress").innerHTML = "Worker: <strong>" + (s.workerName || "Unknown") + "</strong>";';
+  htmlContent += '  if(!s.active && s.status !== "running" && s.status !== "stopping" && s.status !== "idle"){';
+  htmlContent += '    clearInterval(pollTimer);';
+  htmlContent += '    if(countdownTimer){ clearInterval(countdownTimer); countdownTimer = null; }';
+  htmlContent += '    document.getElementById("completion-info").style.display = "block";';
+  htmlContent += '    const compMsg = document.getElementById("completion-msg");';
+  htmlContent += '    if(s.status === "stopped"){';
+  htmlContent += '      compMsg.innerHTML = "⏹️ <strong>Pipeline stopped cleanly.</strong><br>All scraped domains and pending Tracxn updates saved to sheet.";';
+  htmlContent += '    } else {';
+  htmlContent += '      compMsg.textContent = s.status || "Pipeline finished successfully.";';
+  htmlContent += '    }';
+  htmlContent += '    if(stopBtn) stopBtn.disabled = true;';
+  htmlContent += '    fitHeight();';
+  htmlContent += '  }';
+  htmlContent += '}';
+
+  htmlContent += 'function cancelRun(){';
+  htmlContent += '  const btn = document.getElementById("stop-btn");';
+  htmlContent += '  const sText = document.getElementById("status-text");';
+  htmlContent += '  if(!isStopping){';
+  htmlContent += '    isStopping = true;';
+  htmlContent += '    if(btn){ btn.textContent = "⏹️ Stopping (Click for Force Kill)"; btn.style.background = "#fef2f2"; }';
+  htmlContent += '    if(sText){ sText.innerHTML = "⏳ <strong>Stopping pipeline gracefully...</strong><br><span style=\\"font-size:12px;color:#64748b;\\">Stage 1 halted. Draining pending Tracxn updates and saving to sheet...</span>"; }';
+  htmlContent += '    google.script.run.withSuccessHandler(function(){ pollProgress(); }).executeCancelFromUi();';
+  htmlContent += '  } else {';
+  htmlContent += '    if(btn){ btn.textContent = "⚡ Force Killing..."; btn.disabled = true; }';
+  htmlContent += '    google.script.run.withSuccessHandler(function(){ setTimeout(() => google.script.host.close(), 1000); }).executeCancelFromUi();';
+  htmlContent += '  }';
+  htmlContent += '  fitHeight();';
+  htmlContent += '}';
   htmlContent += '</script></body></html>';
 
   const html = HtmlService.createHtmlOutput(htmlContent)
@@ -348,11 +430,18 @@ function getStatusJson() {
 function executeCancelFromUi() {
   const url = PropertiesService.getDocumentProperties().getProperty(CONFIG.ACTIVE_WORKER_PROP);
   if (url) {
-    UrlFetchApp.fetch(url + '/typea/cancel', { 
-      method: 'post', 
-      headers: { 'Authorization': 'Bearer ' + CONFIG.AUTH_TOKEN } 
-    });
+    try {
+      const res = UrlFetchApp.fetch(url + '/typea/cancel', { 
+        method: 'post', 
+        headers: { 'Authorization': 'Bearer ' + CONFIG.AUTH_TOKEN },
+        muteHttpExceptions: true
+      });
+      return JSON.parse(res.getContentText());
+    } catch(e) {
+      return { status: "error", message: e.toString() };
+    }
   }
+  return { status: "no_worker" };
 }
 
 function uiCheckStatus() { 

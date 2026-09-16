@@ -14,7 +14,10 @@ from sr_common.models import RunRequest
 from sr_common.config import settings
 
 # Configure logging
-LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Logs')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(BASE_DIR, 'Logs')
+PROGRESS_FILE = os.path.join(BASE_DIR, ".progress.json")
+STOP_FILE = os.path.join(BASE_DIR, ".stop_requested")
 os.makedirs(LOGS_DIR, exist_ok=True)
 api_log_path = os.path.join(LOGS_DIR, 'api.logs')
 
@@ -60,10 +63,10 @@ def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-
 state_lock = asyncio.Lock()
 state = {
     "status": "idle",
+    "is_stopping": False,
     "current_task": None,
     "start_time": None,
     "active_pid": None,
@@ -76,43 +79,55 @@ def utc_now():
 async def run_pipeline_task(request: RunRequest):
     async with state_lock:
         state["status"] = "running"
+        state["is_stopping"] = False
         state["start_time"] = utc_now()
         state["progress"] = {"current": 0, "total": 0, "success": 0, "fail": 0}
     
+    if os.path.exists(STOP_FILE):
+        try: os.remove(STOP_FILE)
+        except: pass
+
     try:
-        if os.path.exists(".progress.json"):
-            os.remove(".progress.json")
+        if os.path.exists(PROGRESS_FILE):
+            try: os.remove(PROGRESS_FILE)
+            except: pass
             
         cmd = [sys.executable, "main.py", str(request.start_row), request.mode]
         if request.sheet_id:
             cmd.extend(["--sheet_id", request.sheet_id])
         logger.info(f"Starting Type A pipeline: {' '.join(cmd)}")
         
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=os.path.dirname(os.path.abspath(__file__))
-        )
-        state["active_pid"] = process.pid
-        logger.info(f"Pipeline started with PID: {process.pid}")
-        
-        while process.returncode is None:
-            try:
-                if os.path.exists(".progress.json"):
-                    with open(".progress.json", "r") as f:
-                        state["progress"] = json.load(f)
-            except: pass
-            await asyncio.sleep(2)
-            if process.returncode is not None: break
-        
-        stdout, stderr = await process.communicate()
-        if process.returncode == 0:
+        stdout_path = os.path.join(LOGS_DIR, "stdout.log")
+        stderr_path = os.path.join(LOGS_DIR, "stderr.log")
+        with open(stdout_path, "a") as out_f, open(stderr_path, "a") as err_f:
+            process = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=out_f,
+                stderr=err_f,
+                cwd=BASE_DIR
+            )
+            state["active_pid"] = process.pid
+            logger.info(f"Pipeline started with PID: {process.pid}")
+            
+            while process.returncode is None:
+                try:
+                    if os.path.exists(PROGRESS_FILE):
+                        with open(PROGRESS_FILE, "r") as f:
+                            state["progress"] = json.load(f)
+                except: pass
+                await asyncio.sleep(2)
+                if process.returncode is not None: break
+            
+            await process.wait()
+
+        if state.get("is_stopping"):
+            logger.info("Type A pipeline stopped gracefully")
+            state["status"] = "stopped"
+        elif process.returncode == 0:
             logger.info("Type A pipeline completed successfully")
             state["status"] = "succeeded"
         else:
-            err = stderr.decode() if stderr else "Unknown error"
-            logger.error(f"Type A pipeline failed: {err}")
+            logger.error(f"Type A pipeline exited with code {process.returncode}")
             state["status"] = "failed"
             
     except Exception as e:
@@ -121,24 +136,36 @@ async def run_pipeline_task(request: RunRequest):
     finally:
         state["current_task"] = None
         state["active_pid"] = None
+        state["is_stopping"] = False
+        if os.path.exists(STOP_FILE):
+            try: os.remove(STOP_FILE)
+            except: pass
 
 @app.get("/typea/status", dependencies=[Depends(verify_token)])
 async def get_status():
     # Sync with progress file
     try:
-        if os.path.exists(".progress.json"):
-            with open(".progress.json", "r") as f:
+        if os.path.exists(PROGRESS_FILE):
+            with open(PROGRESS_FILE, "r") as f:
                 state["progress"] = json.load(f)
     except:
         pass
         
+    is_stopping = state.get("is_stopping", False) or state["progress"].get("is_stopping", False)
+    current_status = "stopping" if (is_stopping and state["status"] in ("running", "stopping")) else state["status"]
+
     return {
-        "status": state["status"],
-        "active": state["status"] == "running",
+        "status": current_status,
+        "active": state["status"] in ("running", "stopping"),
+        "is_stopping": is_stopping,
         "progress_current": state["progress"].get("current", 0),
         "progress_total": state["progress"].get("total", 0),
         "progress_success": state["progress"].get("success", 0),
         "progress_fail": state["progress"].get("fail", 0),
+        "rate_limit_paused": state["progress"].get("rate_limit_paused", False),
+        "sleep_remaining_sec": state["progress"].get("sleep_remaining_sec", 0.0),
+        "rate_limit_message": state["progress"].get("rate_limit_message", ""),
+        "backlog": state["progress"].get("backlog", 0),
         "workerName": f"{os.environ.get('WORKER_IDENTITY', os.uname().nodename)}-TypeA-Pipeline"
     }
 
@@ -148,23 +175,52 @@ async def health_check():
 
 @app.post("/typea/start", dependencies=[Depends(verify_token)])
 async def start_pipeline(req: RunRequest, background_tasks: BackgroundTasks):
-    if state["status"] == "running":
-        return {"status": "error", "message": "Already running"}
+    if state["status"] in ("running", "stopping"):
+        return {"status": "error", "message": "Pipeline already running or stopping"}
     
     background_tasks.add_task(run_pipeline_task, req)
     return {"status": "accepted"}
 
 @app.post("/typea/cancel", dependencies=[Depends(verify_token)])
 async def cancel_pipeline():
+    logger.info("CANCEL REQUEST RECEIVED.")
     if state["active_pid"]:
+        # If already in stopping state, a second cancel request triggers force kill
+        if state.get("is_stopping"):
+            try:
+                import signal
+                os.kill(state["active_pid"], signal.SIGKILL)
+                logger.info(f"Force killed process {state['active_pid']}")
+            except Exception as e:
+                logger.error(f"Failed to force kill process {state['active_pid']}: {e}")
+            state["status"] = "idle"
+            state["is_stopping"] = False
+            state["active_pid"] = None
+            if os.path.exists(STOP_FILE):
+                try: os.remove(STOP_FILE)
+                except: pass
+            return {"status": "ok", "message": "Force terminated"}
+
+        # Graceful stop: first request
+        state["is_stopping"] = True
+        state["status"] = "stopping"
+        try:
+            with open(STOP_FILE, "w") as f:
+                f.write("stop")
+        except Exception as e:
+            logger.error(f"Failed to create stop file: {e}")
+
         try:
             import signal
-            os.kill(state["active_pid"], signal.SIGKILL)
-            logger.info(f"Killed process {state['active_pid']}")
+            os.kill(state["active_pid"], signal.SIGTERM)
+            logger.info(f"Sent SIGTERM to process {state['active_pid']} for graceful stop")
         except Exception as e:
-            logger.error(f"Failed to kill process {state['active_pid']}: {e}")
+            logger.error(f"Failed to send SIGTERM to {state['active_pid']}: {e}")
+
+        return {"status": "stopping", "message": "Graceful stop requested. Draining Tracxn queue and saving progress."}
+
     state["status"] = "idle"
-    state["active_pid"] = None
+    state["is_stopping"] = False
     return {"status": "ok"}
 
 if __name__ == "__main__":
