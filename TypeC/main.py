@@ -407,6 +407,13 @@ class TypeCPipeline:
             if len(r) > 1 and r[1].strip():
                 data_rows.append((i, r))
         
+        if data_rows:
+            max_idx = max(idx for idx, _ in data_rows)
+            if max_idx > ws.row_count:
+                needed = max_idx - ws.row_count + 100
+                pipeline_logger.info(f"Expanding worksheet grid: adding {needed} rows...")
+                await ws.add_rows(needed)
+        
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
         prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_values())[1:10]]
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
@@ -561,7 +568,7 @@ class TypeCPipeline:
                         if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                        await r_q.put({'range': f"H{idx}", 'values': [[reason]]})
+                        await r_q.put({'range': f"H{idx}", 'values': [[reason[:500]]]})
                         
                         scraper_used = res.get("scraper_used", "BU")
                         await r_q.put({'range': f"S{idx}", 'values': [[scraper_used]]})
@@ -708,6 +715,8 @@ class TypeCPipeline:
                 row_data = item.get('row')
                 err_domain = row_data[d_idx] if isinstance(row_data, list) and len(row_data) > d_idx else 'unknown'
                 pipeline_logger.error(f"TRACXN WORKER ERROR for {err_domain}: {e}")
+                if 'idx' in item:
+                    await r_q.put({'range': f"K{item['idx']}:N{item['idx']}", 'values': [["", "Err Tracxn", "Err Tracxn", "Err Tracxn"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 t_q.task_done()
@@ -738,6 +747,14 @@ class TypeCPipeline:
                     m = re.search(r'\d+', u.get('range', ''))
                     return int(m.group(0)) if m else 0
                 
+                def clean_range(r):
+                    return r.split("!")[-1]
+                
+                def sanitize_val(v):
+                    if isinstance(v, str) and len(v) > 45000:
+                        return v[:45000]
+                    return v
+
                 # Deduplicate updates
                 latest_updates = {}
                 for u in updates:
@@ -747,10 +764,39 @@ class TypeCPipeline:
                 
                 for attempt in range(5):
                     try:
-                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        clean_payload = [
+                            {
+                                'range': clean_range(u['range']),
+                                'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                            }
+                            for u in updates_to_send
+                        ]
+                        await asyncio.wait_for(ws.batch_update(clean_payload, value_input_option='USER_ENTERED'), timeout=120)
                         system_logger.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
                         break
                     except Exception as e:
+                        if attempt == 3:
+                            # Fallback: Attempt chunked updates (batches of 5) to isolate any single rogue update
+                            pipeline_logger.warning(f"Batch flush failed on attempt {attempt+1}: {e}. Falling back to chunked updates...")
+                            try:
+                                chunk_size = 5
+                                for ci in range(0, len(updates_to_send), chunk_size):
+                                    sub_chunk = updates_to_send[ci:ci + chunk_size]
+                                    sub_payload = [
+                                        {
+                                            'range': clean_range(u['range']),
+                                            'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                                        }
+                                        for u in sub_chunk
+                                    ]
+                                    try:
+                                        await asyncio.wait_for(ws.batch_update(sub_payload, value_input_option='USER_ENTERED'), timeout=30)
+                                    except Exception as sub_e:
+                                        pipeline_logger.error(f"Chunk failed ({[u['range'] for u in sub_chunk]}): {sub_e}")
+                                system_logger.info(f"SHEET WRITER CHUNKED FLUSH COMPLETED.")
+                                break
+                            except Exception as chunk_err:
+                                pipeline_logger.error(f"Chunked fallback error: {chunk_err}")
                         if attempt == 4:
                             pipeline_logger.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
                             raise e
@@ -758,7 +804,7 @@ class TypeCPipeline:
                         pipeline_logger.warning(f"Flush attempt {attempt+1} failed: {e}. Retrying in {sleep_time}s...")
                         await asyncio.sleep(sleep_time)
                 
-                for u in updates:
+                for u in updates_to_send:
                     match = re.search(r'\d+', u['range'])
                     if match: processed_indices.add(int(match.group()))
                 

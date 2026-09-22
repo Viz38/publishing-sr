@@ -1,3 +1,26 @@
+## [2026-09-22] Hardening Google Sheets Writer, In-Place Range Mutation Fix, & Error Fallback Across Type A, B, and C
+Files changed:
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- Temp_Test/test_sheet_writer_hardening.py
+Reason:
+1. Prevent `gspread` In-Place Range Mutation on Batch Retry:
+   - Root Cause: `gspread.Worksheet.batch_update()` prepends `'DB'!` to each dictionary's `'range'` key in-place. If an initial flush encountered a transient network issue, rate limit, or cell size rejection, subsequent retry attempts sent stacked sheet titles (`'DB'!'DB'!range`), triggering Google Sheets API HTTP 400 (`Unable to parse range`) across all 5 retries and permanently dropping entire batches of 35-50 updates in the `finally` block.
+   - Fix: Added `clean_range(r)` to strip sheet titles (`r.split("!")[-1]`) and constructed fresh payload dictionaries on every retry attempt in `_flush_to_sheets` across Type A, Type B, and Type C.
+2. 45,000-Character Cell Sanitization & Error Truncation:
+   - Root Cause: Google Sheets API rejects cell values exceeding 50,000 characters with HTTP 400. Uncapped Gemini error snippets or raw scraper outputs caused entire batches to fail and be dropped.
+   - Fix: Added `sanitize_val()` in `_flush_to_sheets` across all 3 engines capping string length to 45,000 characters. Capped error reasons to 500 characters and Gemini error outputs to 200 characters.
+3. Fallback Error Status in `tracxn_worker` Exception Handler:
+   - Root Cause: When `tracxn_worker` caught an unhandled exception, it queued `{'type': 'progress', 'is_success': False}` but omitted the row's range/values from `r_q`, leaving the domain row indefinitely blank on Google Sheets.
+   - Fix: Added explicit error status write (`"Err Tracxn"`) to `r_q` within `except Exception` across Type A, Type B, and Type C.
+4. Chunked Fallback on Batch Flush Failure:
+   - Added sub-batch chunked fallback (size 5) on retry attempt 3 to isolate any single rogue row and guarantee surviving rows are persisted.
+5. Dynamic Worksheet Grid Expansion:
+   - Added automatic grid expansion (`ws.add_rows(needed)`) during startup if data row indices exceed current `ws.row_count`.
+Related tests:
+- Temp_Test/test_sheet_writer_hardening.py
+
 ## [2026-09-16] Fix Type B Google Sheets Writing & Unify Completed UI Status Signals Across Type A, B, and C
 Files changed:
 - TypeA/main.py

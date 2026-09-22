@@ -723,6 +723,11 @@ class TypeAPipeline:
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
+                max_idx = max((idx for idx, _ in data_rows), default=0)
+                if max_idx > ws.row_count:
+                    needed = max_idx - ws.row_count + 100
+                    pipeline_logger.info(f"Expanding worksheet grid: adding {needed} rows...")
+                    await ws.add_rows(needed)
                 break
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
@@ -972,7 +977,7 @@ class TypeAPipeline:
                             reason = reason
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
-                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
+                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason[:500]]]})
 
                 if self.mode != "phase1" and (is_success or self.mode != "phase2"):
                     res_for_tracxn = dict(res)
@@ -1133,6 +1138,9 @@ class TypeAPipeline:
             except Exception as e:
                 err_domain = domain if 'domain' in locals() else (item.get('row', ['unknown', 'unknown'])[h_map.get('domain', 1)] if isinstance(item.get('row'), list) and len(item.get('row', [])) > h_map.get('domain', 1) else 'unknown')
                 pipeline_logger.error(f"TRACXN WORKER ERROR for {err_domain}: {e}")
+                if 'h_map' in locals() and 'idx' in locals():
+                    u_col, w_col = ("V", "X") if h_map.get("r1") == "J" else ("U", "W")
+                    await r_q.put({'range': f"{u_col}{idx}:{w_col}{idx}", 'values': [["Err Tracxn", "Err Tracxn", "Err Tracxn"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 t_q.task_done()
@@ -1162,6 +1170,14 @@ class TypeAPipeline:
                     m = re.search(r'\d+', u.get('range', ''))
                     return int(m.group()) if m else 0
                 
+                def clean_range(r):
+                    return r.split("!")[-1]
+                
+                def sanitize_val(v):
+                    if isinstance(v, str) and len(v) > 45000:
+                        return v[:45000]
+                    return v
+
                 # Deduplicate updates, keeping latest update for each range
                 latest_updates = {}
                 for u in updates:
@@ -1171,10 +1187,39 @@ class TypeAPipeline:
                 
                 for attempt in range(5):
                     try:
-                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        clean_payload = [
+                            {
+                                'range': clean_range(u['range']),
+                                'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                            }
+                            for u in updates_to_send
+                        ]
+                        await asyncio.wait_for(ws.batch_update(clean_payload, value_input_option='USER_ENTERED'), timeout=120)
                         logging.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
                         break
                     except Exception as e:
+                        if attempt == 3:
+                            # Fallback: Attempt chunked updates (batches of 5) to isolate any single rogue update
+                            logging.warning(f"Batch flush failed on attempt {attempt+1}: {e}. Falling back to chunked updates...")
+                            try:
+                                chunk_size = 5
+                                for ci in range(0, len(updates_to_send), chunk_size):
+                                    sub_chunk = updates_to_send[ci:ci + chunk_size]
+                                    sub_payload = [
+                                        {
+                                            'range': clean_range(u['range']),
+                                            'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                                        }
+                                        for u in sub_chunk
+                                    ]
+                                    try:
+                                        await asyncio.wait_for(ws.batch_update(sub_payload, value_input_option='USER_ENTERED'), timeout=30)
+                                    except Exception as sub_e:
+                                        logging.error(f"Chunk failed ({[u['range'] for u in sub_chunk]}): {sub_e}")
+                                logging.info(f"SHEET WRITER CHUNKED FLUSH COMPLETED.")
+                                break
+                            except Exception as chunk_err:
+                                logging.error(f"Chunked fallback error: {chunk_err}")
                         if attempt == 4:
                             logging.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
                             raise e

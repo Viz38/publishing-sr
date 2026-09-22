@@ -326,7 +326,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     
     if not sd or not ld: 
         pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed - missing descriptions"+res_p1, "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
+        return {"type": "error", "reason": "LLM failed - missing descriptions: " + res_p1[:200], "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows}
     
     feed = row[h_map["feed"]].split(" : ")[1] if " : " in row[h_map["feed"]] else row[h_map["feed"]]
     f_id, f_def = f_ids.get(feed, ""), f_defs.get(feed, "")
@@ -439,6 +439,11 @@ class TypeBPipeline:
                 total = len(data_rows)
                 pipeline_logger.info(f"Total rows to process: {total}")
                 self.report_progress(0, total, 0, 0)
+                max_idx = max((idx for idx, _ in data_rows), default=0)
+                if max_idx > ws.row_count:
+                    needed = max_idx - ws.row_count + 100
+                    pipeline_logger.info(f"Expanding worksheet grid: adding {needed} rows...")
+                    await ws.add_rows(needed)
                 break
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
@@ -653,7 +658,7 @@ class TypeBPipeline:
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
                         stat_col = h_map["r1"]
-                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason]]})
+                        await r_q.put({'range': f"{stat_col}{idx}", 'values': [[reason[:500]]]})
                         
                         scraper_col = h_map.get("scraper_col", "Y")
                         await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
@@ -798,6 +803,9 @@ class TypeBPipeline:
             except Exception as e:
                 err_domain = domain if 'domain' in locals() else (item.get('row', ['unknown', 'unknown'])[h_map.get('domain', 1)] if isinstance(item.get('row'), list) and len(item.get('row', [])) > h_map.get('domain', 1) else 'unknown')
                 pipeline_logger.error(f"TRACXN WORKER ERROR for {err_domain}: {e}")
+                if 'h_map' in locals() and 'idx' in locals():
+                    o_col, s_col = ("P", "T") if h_map.get("r1") == "J" else ("O", "S")
+                    await r_q.put({'range': f"{o_col}{idx}:{s_col}{idx}", 'values': [["N/A", "", "Err Tracxn", "Err Tracxn", "Err Tracxn"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 t_q.task_done()
@@ -827,6 +835,15 @@ class TypeBPipeline:
                 def get_row_num(u):
                     m = re.search(r'\d+', u.get('range', ''))
                     return int(m.group()) if m else 0
+                
+                def clean_range(r):
+                    return r.split("!")[-1]
+                
+                def sanitize_val(v):
+                    if isinstance(v, str) and len(v) > 45000:
+                        return v[:45000]
+                    return v
+
                 # Deduplicate updates, keeping latest update for each range
                 latest_updates = {}
                 for u in updates:
@@ -836,10 +853,39 @@ class TypeBPipeline:
                 
                 for attempt in range(5):
                     try:
-                        await asyncio.wait_for(ws.batch_update(updates_to_send, value_input_option='USER_ENTERED'), timeout=120)
+                        clean_payload = [
+                            {
+                                'range': clean_range(u['range']),
+                                'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                            }
+                            for u in updates_to_send
+                        ]
+                        await asyncio.wait_for(ws.batch_update(clean_payload, value_input_option='USER_ENTERED'), timeout=120)
                         system_logger.info(f"SHEET WRITER FLUSH SUCCESSFUL for {len(updates_to_send)} ranges.")
                         break
                     except Exception as e:
+                        if attempt == 3:
+                            # Fallback: Attempt chunked updates (batches of 5) to isolate any single rogue update
+                            pipeline_logger.warning(f"Batch flush failed on attempt {attempt+1}: {e}. Falling back to chunked updates...")
+                            try:
+                                chunk_size = 5
+                                for ci in range(0, len(updates_to_send), chunk_size):
+                                    sub_chunk = updates_to_send[ci:ci + chunk_size]
+                                    sub_payload = [
+                                        {
+                                            'range': clean_range(u['range']),
+                                            'values': [[sanitize_val(val) for val in row] for row in u.get('values', [[]])]
+                                        }
+                                        for u in sub_chunk
+                                    ]
+                                    try:
+                                        await asyncio.wait_for(ws.batch_update(sub_payload, value_input_option='USER_ENTERED'), timeout=30)
+                                    except Exception as sub_e:
+                                        pipeline_logger.error(f"Chunk failed ({[u['range'] for u in sub_chunk]}): {sub_e}")
+                                system_logger.info(f"SHEET WRITER CHUNKED FLUSH COMPLETED.")
+                                break
+                            except Exception as chunk_err:
+                                pipeline_logger.error(f"Chunked fallback error: {chunk_err}")
                         if attempt == 4:
                             pipeline_logger.critical(f"FATAL: All 5 flush attempts failed. Data saved to CSV backup: {e}")
                             raise e
