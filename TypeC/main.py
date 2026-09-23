@@ -25,7 +25,7 @@ from sr_common.config import settings
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
-    update_manual_curation_date
+    update_manual_curation_date, is_tc_scraper_mode, col_to_index
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -253,16 +253,27 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
         final_url = f"https://{domain}"
         body = raw_data.strip()
     else:
-        # Tier 2: Tech Crawler — check Supabase
-        supabase_content = await fetch_scraped_content(domain)
-        if supabase_content:
-            body = supabase_content
-            scraper_used = "Tech Crawler"
-            pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(body)} chars)")
-        else:
-            # Tier 3: BU — run the built-in StealthFetcher
+        # Check Scraper Type from row (Col S = index 18)
+        scraper_idx = h_map.get("scraper_idx", 18)
+        raw_scraper_type = row[scraper_idx].strip() if len(row) > scraper_idx else ""
+        use_tc = is_tc_scraper_mode(raw_scraper_type)
+        
+        body = None
+        if use_tc:
+            # TC Mode: Check Supabase (Tech Crawler)
+            supabase_content = await fetch_scraped_content(domain)
+            if supabase_content:
+                body = supabase_content
+                scraper_used = "Tech Crawler"
+                pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(body)} chars)")
+            else:
+                pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper fallback from TC miss)")
+        
+        # BU Mode (or TC miss fallback): run built-in StealthFetcher
+        if not body:
             scraper_used = "BU"
-            pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
+            if not use_tc:
+                pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
             html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
 
             if html is None:
@@ -398,7 +409,8 @@ class TypeCPipeline:
         
         h_map = {
             "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
-            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3
+            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3,
+            "scraper_col": "S", "scraper_idx": 18
         }
         
         all_rows = await ws.get_values()

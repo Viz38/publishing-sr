@@ -1,3 +1,25 @@
+## [2026-09-23] Row-Level Scraper Mode Gating (TC vs BU) & Dynamic CPU Concurrency Scaling
+Files changed:
+- sr_common/utils.py
+- sr_common/config.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- Temp_Test/test_gating_and_scaling.py
+Reason:
+1. Row-Level Scraper Mode Gating:
+   - Root Cause: All pipeline engines previously performed unconditional Supabase lookups (`fetch_scraped_content`) for every domain. When domains were not pre-cached (99.8% miss rate), this generated thousands of redundant network roundtrips to Supabase, adding unnecessary latency.
+   - Fix: Added row-level gating checking the Scraper Type column in each worksheet (Col AB for Type A, Col X for Type B, Col S for Type C).
+   - Rules:
+     - `TC` / `Tech` / `Tech Crawler` (case-insensitive): checks Supabase first; falls back to BU if not found.
+     - `BU` or empty/blank (default): completely bypasses Supabase DB queries and goes straight to built-in StealthFetcher.
+2. Dynamic CPU Concurrency Scaling:
+   - Root Cause: `get_dynamic_max_workers()` scaled CPU limit using `cores * 2` (designed for browser tasks). On 2-core machines, this hard-capped workers at only 4-5 despite ample RAM and CPU headroom, limiting live throughput to ~2,000 domains/hr instead of the expected 6,000-7,000 domains/hr.
+   - Fix: Increased scaling to `cores * 8` (acknowledging the I/O-bound nature of `curl-cffi` + async Gemini API) and allowed `CONFIGURED_MAX_WORKERS` to scale concurrency to 15–20 workers when RAM permits, while preserving strict OOM protection.
+3. Kept Tier 2 Headless Browser timeout at 25s per user requirement.
+Related tests:
+- Temp_Test/test_gating_and_scaling.py
+
 ## [2026-09-22] Hardening Google Sheets Writer, In-Place Range Mutation Fix, & Error Fallback Across Type A, B, and C
 Files changed:
 - TypeA/main.py

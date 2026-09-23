@@ -27,7 +27,7 @@ from sr_common.utils import (
     call_gemini_api, call_tracxn_api, extract_descriptions, 
     get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
-    update_manual_curation_date
+    update_manual_curation_date, is_tc_scraper_mode, col_to_index
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -263,16 +263,30 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         body = raw_data.strip()
         scraper_used = "Manual"
     else:
-        # Tier 2: Tech Crawler — check Supabase
-        supabase_content = await fetch_scraped_content(domain)
-        if supabase_content:
-            body = supabase_content
-            scraper_used = "Tech Crawler"
-            pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(body)} chars)")
-        else:
-            # Tier 3: BU — run the built-in StealthFetcher
+        # Check Scraper Type from row (Col X = index 23 standard, or index 24 shifted)
+        scraper_idx = h_map.get("scraper_idx")
+        if scraper_idx is None:
+            scraper_col = h_map.get("scraper_col", "X")
+            scraper_idx = col_to_index(scraper_col)
+        raw_scraper_type = row[scraper_idx].strip() if len(row) > scraper_idx else ""
+        use_tc = is_tc_scraper_mode(raw_scraper_type)
+
+        body = None
+        if use_tc:
+            # TC Mode: Check Supabase (Tech Crawler)
+            supabase_content = await fetch_scraped_content(domain)
+            if supabase_content:
+                body = supabase_content
+                scraper_used = "Tech Crawler"
+                pipeline_logger.info(f"DATASOURCE: {domain} → Tech Crawler (Supabase, {len(body)} chars)")
+            else:
+                pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper fallback from TC miss)")
+
+        # BU Mode (or TC miss fallback): run built-in StealthFetcher
+        if not body:
             scraper_used = "BU"
-            pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
+            if not use_tc:
+                pipeline_logger.info(f"DATASOURCE: {domain} → BU (built-in scraper)")
             html, final_url, reason = await fetcher.fetch(browser, f"https://{domain}")
 
             if html is None:
@@ -459,7 +473,8 @@ class TypeBPipeline:
                     "r1": "J", "r2": "T", "r3": "U", # Shifted: J-T, U-W
                     "raw_data": 23, # Col X
                     "raw_data_col": "X",
-                    "scraper_col": "Y"
+                    "scraper_col": "Y",
+                    "scraper_idx": 24
                 }
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -470,7 +485,8 @@ class TypeBPipeline:
                     "r1": "H", "r2": "S", "r3": "T", # Standard: H-S, T-V
                     "raw_data": 22, # Col W
                     "raw_data_col": "W",
-                    "scraper_col": "X"
+                    "scraper_col": "X",
+                    "scraper_idx": 23
                 }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:
