@@ -19,7 +19,7 @@ class SystemHealthMonitor:
     Ensures workers only process domains when resources are within safe limits.
     Uses non-blocking cpu_percent(interval=None) to avoid stalling the async event loop.
     """
-    def __init__(self, cpu_threshold: float = 90.0, mem_threshold: float = 90.0):
+    def __init__(self, cpu_threshold: float = 90.0, mem_threshold: float = 88.0):
         self.cpu_threshold = cpu_threshold
         self.mem_threshold = mem_threshold
         import psutil
@@ -31,18 +31,25 @@ class SystemHealthMonitor:
         mem = self._psutil.virtual_memory().percent
         
         if mem > self.mem_threshold:
-            return False, f"Memory too high ({mem}%)"
+            import gc
+            gc.collect()
+            mem_after = self._psutil.virtual_memory().percent
+            if mem_after > self.mem_threshold:
+                return False, f"Memory too high ({mem_after}%)"
         return True, "Healthy"
 
     async def wait_for_resources(self, logger=None, timeout=None, fast_fail_ram=False):
         """Pauses execution if system resources are saturated. Raises TimeoutError if timeout is reached."""
         start_time = time.time()
+        import random
         while True:
             healthy, reason = self.is_healthy()
             if healthy:
                 break
                 
             if fast_fail_ram and "Memory" in reason:
+                import gc
+                gc.collect()
                 if logger:
                     logger.error(f"HEALTH_GATE: Fast failing on RAM saturation ({reason}) to recycle resources.")
                 raise MemoryError(f"Resource saturation: {reason}")
@@ -59,7 +66,7 @@ class SystemHealthMonitor:
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
-            await asyncio.sleep(5) # Shorter sleep to prevent AppScript timeouts
+            await asyncio.sleep(random.uniform(4.0, 8.0)) # Jittered sleep to prevent thundering herd
 
 
 # Load Parked Domain Dictionary
@@ -525,33 +532,31 @@ def is_tc_scraper_mode(val: Any) -> bool:
     v = str(val).strip().lower()
     return v in ("tc", "tech", "tech crawler") or v.startswith("tc") or v.startswith("tech")
 
-def get_dynamic_max_workers(ram_per_worker_gb: float = 0.2) -> int:
+def get_dynamic_max_workers(ram_per_worker_gb: float = 0.45) -> int:
     """
     Calculates the maximum number of concurrent workers based on AVAILABLE system resources.
-    Assumes ~200MB per worker.
-    Scraper is primarily I/O-bound (curl-cffi + async Gemini API), so CPU scaling uses cores * 8.
-    Allows CONFIGURED_MAX_WORKERS to scale concurrency to 15-20 workers when RAM permits.
-    Enforces safe limit and respects CONFIGURED_MIN_WORKERS.
+    Assumes ~450MB per worker (handling full HTML, subpages, and Gemini responses).
+    Leaves at least 2GB of headroom for the OS and desktop UI.
+    Enforces safe limit and respects CONFIGURED_MIN_WORKERS and CONFIGURED_MAX_WORKERS.
     """
     import psutil
     from .config import settings
     
-    configured_max = getattr(settings, "CONFIGURED_MAX_WORKERS", 20)
+    configured_max = getattr(settings, "CONFIGURED_MAX_WORKERS", 12)
     configured_min = getattr(settings, "CONFIGURED_MIN_WORKERS", 1)
     cores = psutil.cpu_count(logical=False) or 2
     available_mem_gb = psutil.virtual_memory().available / (1024**3)
     
-    # 1. CPU-based scaling (8 workers per physical core for I/O-heavy scraping)
-    cpu_limit = cores * 8
+    # 1. CPU-based scaling (4 workers per physical core)
+    cpu_limit = cores * 4
     
-    # 2. RAM-based scaling (Leave at least 1GB for the OS)
-    ram_limit = int(max(0, available_mem_gb - 1.0) / ram_per_worker_gb)
+    # 2. RAM-based scaling (Leave at least 2GB for the OS and desktop)
+    ram_limit = int(max(0, available_mem_gb - 2.0) / ram_per_worker_gb)
     
-    # Allow configured_max to take precedence up to 20 when RAM permits, bounded by cpu_limit
-    safe_limit = max(1, min(max(cpu_limit, min(configured_max, 20)), ram_limit))
+    # Bound by configured_max, cpu_limit, and ram_limit
+    safe_limit = max(1, min(configured_max, min(cpu_limit, ram_limit)))
     
-    calculated_limit = min(configured_max, safe_limit)
-    return max(configured_min, calculated_limit)
+    return max(configured_min, safe_limit)
 
 
 async def update_manual_curation_date(session: aiohttp.ClientSession, company_id: str, limiter, headers: dict) -> tuple:

@@ -428,7 +428,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
             user_p1 = "URL: " + str(final_url) + "\n\nRaw Content:\n" + p1_content
             cache_id1 = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
-            pipeline_logger.info(f"P1 User Prompt for {domain}:\n{user_p1}")
+            pipeline_logger.info(f"P1 User Prompt dispatched for {domain} (length: {len(user_p1)} chars)")
             p1_coro = call_gemini_api(session, user_p1, gemini_limiter, system_instruction=sys_p1, cached_content_name=cache_id1, cache_manager=cache_manager, cache_key="prompt_0")
             bm_p1_raw = prompts[0].replace("XX", p1_content)
         else:
@@ -444,7 +444,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         if len(parts_p2) == 2:
             sys_p2 = parts_p2[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p2[1].strip()
             user_p2 = "Raw Content:\n" + p2_content
-            pipeline_logger.info(f"P2 User Prompt for {domain}:\n{user_p2}")
+            pipeline_logger.info(f"P2 User Prompt dispatched for {domain} (length: {len(user_p2)} chars)")
             cache_id2 = await cache_manager.get_or_create(session, "prompt_0", sys_p2, ttl="86400s")
             p2_coro = call_gemini_api(session, user_p2, gemini_limiter, system_instruction=sys_p2, cached_content_name=cache_id2, cache_manager=cache_manager, cache_key="prompt_0")
     elif has_p2_content:
@@ -1011,9 +1011,12 @@ class TypeAPipeline:
                     await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 if "Resource saturation" in str(e):
-                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off 5s...")
+                    import gc, random
+                    gc.collect()
+                    backoff = random.uniform(6.0, 12.0)
+                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off {backoff:.1f}s...")
                     await w_q.put((idx, row))
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(backoff)
                 else:
                     pipeline_logger.error(f"FATAL WORKER ERROR for {domain if domain else 'Unknown'}: {e}")
                     if self.mode != "phase2":
@@ -1293,6 +1296,7 @@ class TypeAPipeline:
                     while not r_q.empty() and len(items_to_process) < 50:
                         items_to_process.append(r_q.get_nowait())
                     
+                    csv_rows = []
                     for i in items_to_process:
                         if isinstance(i, dict):
                             if i.get('type') == 'progress':
@@ -1308,15 +1312,16 @@ class TypeAPipeline:
                                 r_q.task_done()
                             else:
                                 updates.append(i)
-                                # Immediate write-ahead to CSV
-                                try:
-                                    with open(csv_path, 'a', newline='', encoding='utf-8') as f_csv:
-                                        writer = csv.writer(f_csv)
-                                        vals = i.get('values', [[]])[0]
-                                        writer.writerow([i.get('range', '')] + [str(v)[:1000] for v in vals])
-                                except Exception as e:
-                                    logging.error(f"CSV BACKUP ERR: {e}")
-                                logging.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
+                                vals = i.get('values', [[]])[0]
+                                csv_rows.append([i.get('range', '')] + [str(v)[:1000] for v in vals])
+                    
+                    if csv_rows:
+                        try:
+                            with open(csv_path, 'a', newline='', encoding='utf-8') as f_csv:
+                                writer = csv.writer(f_csv)
+                                writer.writerows(csv_rows)
+                        except Exception as e:
+                            logging.error(f"CSV BACKUP ERR: {e}")
                 
                 time_since_flush = time.time() - last_flush
                 if updates and (len(updates) >= 10 or time_since_flush > 5 or (s + f) == total or self.stop_requested or r_q.empty()):

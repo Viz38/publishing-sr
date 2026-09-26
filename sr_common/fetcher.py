@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import logging
 from typing import Optional, Tuple, Any, Dict
 from curl_cffi.requests import AsyncSession
@@ -24,12 +25,13 @@ def is_permanent_network_error(err: Exception) -> bool:
 
 class _LazySemaphore:
     """Loop-safe lazy semaphore that bounds concurrent browser processes."""
-    def __init__(self):
+    def __init__(self, max_concurrent: int = 3):
         self._sem = None
+        self.max_concurrent = max_concurrent
 
     def _get(self):
         if self._sem is None:
-            self._sem = asyncio.Semaphore(get_dynamic_max_workers())
+            self._sem = asyncio.Semaphore(min(self.max_concurrent, get_dynamic_max_workers()))
         return self._sem
 
     async def __aenter__(self):
@@ -72,7 +74,7 @@ class BrowserManager:
                     self.nav_count = 0
 
                     if old_browser:
-                        if self.grace_period <= 0:
+                        if self.grace_period <= 0 or mem_high:
                             try:
                                 await old_browser.close()
                             except Exception as e:
@@ -183,7 +185,11 @@ class StealthFetcher:
             b_instance = browser
             if hasattr(browser, "get_browser"):
                 try:
-                    b_instance = await browser.get_browser()
+                    res_b = browser.get_browser()
+                    if inspect.isawaitable(res_b):
+                        b_instance = await res_b
+                    else:
+                        b_instance = res_b
                 except Exception as be:
                     logger.warning(f"TIER 2 ERR: Failed to get browser from manager: {be}")
                     b_instance = None
@@ -228,9 +234,9 @@ class StealthFetcher:
                                         except Exception as ce:
                                             logger.warning(f"TIER 2 ERR: Failed to close context cleanly: {ce}")
 
-                        res_content, res_url, res_status = await asyncio.wait_for(_run_tier2(), timeout=25.0)
-                        if res_content:
-                            return res_content, res_url, res_status
+                            res_content, res_url, res_status = await asyncio.wait_for(_run_tier2(), timeout=25.0)
+                            if res_content:
+                                return res_content, res_url, res_status
                         break
                     except asyncio.TimeoutError:
                         logger.error(f"TIER 2 TIMEOUT: Browser navigation exceeded 25s for {url}")

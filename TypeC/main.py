@@ -601,9 +601,12 @@ class TypeCPipeline:
                     await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 if "Resource saturation" in str(e):
-                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off 5s...")
+                    import gc, random
+                    gc.collect()
+                    backoff = random.uniform(6.0, 12.0)
+                    pipeline_logger.warning(f"Re-queuing row {idx} due to Resource Saturation. Backing off {backoff:.1f}s...")
                     await w_q.put((idx, row))
-                    await asyncio.sleep(5.0)
+                    await asyncio.sleep(backoff)
                 else:
                     pipeline_logger.error(f"FATAL WORKER ERROR for {row[h_map['domain']] if row else 'Unknown'}: {e}")
                     if self.mode != "phase2":
@@ -867,6 +870,7 @@ class TypeCPipeline:
                     while not r_q.empty() and len(items_to_process) < 50:
                         items_to_process.append(r_q.get_nowait())
                     
+                    csv_rows = []
                     for i in items_to_process:
                         if isinstance(i, dict):
                             if i.get('type') == 'progress':
@@ -882,15 +886,16 @@ class TypeCPipeline:
                                 r_q.task_done()
                             else:
                                 updates.append(i)
-                                # Immediate write-ahead to CSV
-                                try:
-                                    with open(csv_path, 'a', newline='', encoding='utf-8') as f:
-                                        writer = csv.writer(f)
-                                        vals = i.get('values', [[]])[0]
-                                        writer.writerow([i.get('range', '')] + [str(v)[:1000] for v in vals])
-                                except Exception as e:
-                                    pipeline_logger.error(f"CSV BACKUP ERR: {e}")
-                                system_logger.info(f"SHEET WRITER appended item for range: {i.get('range', 'Unknown')}. Total updates: {len(updates)}")
+                                vals = i.get('values', [[]])[0]
+                                csv_rows.append([i.get('range', '')] + [str(v)[:1000] for v in vals])
+                    
+                    if csv_rows:
+                        try:
+                            with open(csv_path, 'a', newline='', encoding='utf-8') as f:
+                                writer = csv.writer(f)
+                                writer.writerows(csv_rows)
+                        except Exception as e:
+                            pipeline_logger.error(f"CSV BACKUP ERR: {e}")
                 
                 time_since_flush = time.time() - last_flush
                 if updates and (len(updates) >= 10 or time_since_flush > 5 or (success + fail) == total or self.stop_requested or r_q.empty()):

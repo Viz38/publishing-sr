@@ -1,3 +1,34 @@
+## [2026-09-26] Fix High RAM Saturation, System Hangs, and Browser/Log Bloat on Local Devices
+Files changed:
+- sr_common/fetcher.py
+- sr_common/utils.py
+- sr_common/config.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+Reason:
+1. Fix Unbounded Browser Concurrency & Memory Leak in `sr_common/fetcher.py`:
+   - Root Cause: In `StealthFetcher._fetch_internal()`, `BROWSER_SEMAPHORE` was acquired only around the definition of `_run_tier2()`, releasing the semaphore immediately before `await asyncio.wait_for(_run_tier2())` executed. This allowed all concurrent workers (20-25) to launch unthrottled Camoufox (Firefox) and Patchright (Chromium) processes simultaneously, each consuming 300-800MB and exhausting system RAM.
+   - Fix: Wrapped actual execution of `_run_tier2()` inside `async with BROWSER_SEMAPHORE:`. Capped `_LazySemaphore` to a maximum of 3 concurrent browser instances. Updated `BrowserManager.get_browser()` to close old browsers immediately (`grace_period=0`) when memory is high (`mem_high=True`) rather than running two full browser instances simultaneously.
+2. Eliminate Massive Raw HTML Prompt Logging in `TypeA/main.py`:
+   - Root Cause: Lines 431 and 447 logged the full raw HTML text of `user_p1` and `user_p2` (up to 100KB per domain) to `pipeline.logs`, inflating the log file to 834MB over 21,000 domains and overwhelming OS dirty page caches/disk I/O.
+   - Fix: Replaced raw prompt dumping with concise metadata logging (domain name and character length).
+3. Active Garbage Collection & Jittered Backoff in Health Gate:
+   - Root Cause: When RAM reached 90%, workers fast-failed with `Resource saturation`, re-queued, and slept 5s. All 20-25 workers woke up simultaneously, re-checked RAM (which was still >90% because memory was not freed and `gc.collect()` was never invoked), and looped indefinitely, locking the OS with load averages reaching 94.97.
+   - Fix: Added `gc.collect()` in `SystemHealthMonitor.is_healthy()` and `wait_for_resources()`, adjusted memory threshold to 88% for safety headroom, and implemented randomized backoff (6-12s) on saturation re-queuing across Type A, B, and C.
+4. Laptop Worker Sizing & OS Headroom Protection in `sr_common/utils.py`:
+   - Root Cause: `get_dynamic_max_workers()` assumed an unrealistic 200MB per worker (`ram_per_worker_gb = 0.2`) and left only 1GB for the OS, allocating 20-25 workers on 8-16GB machines.
+   - Fix: Updated `ram_per_worker_gb` to 450MB, reserved at least 2GB RAM exclusively for OS/desktop UI, capped default `CONFIGURED_MAX_WORKERS` to 12 in `sr_common/config.py`, and bounded CPU scaling to 4 workers per core.
+5. Batch Results CSV Writes:
+   - Root Cause: `sheet_writer` in Type A, B, and C opened, appended, and closed `results_backup.csv` for every single cell update dictionary (150,000+ file handles).
+   - Fix: Batched CSV row writes in `sheet_writer` using `writer.writerows(csv_rows)`.
+Related tests:
+- Temp_Test/test_browser_semaphore.py
+- Temp_Test/test_prompt_logging.py
+- Temp_Test/test_health_gate_recovery.py
+- Temp_Test/test_dynamic_workers.py
+- Temp_Test/test_resource_saturation_recovery.py
+
 ## [2026-09-23] Row-Level Scraper Mode Gating (TC vs BU) & Dynamic CPU Concurrency Scaling
 Files changed:
 - sr_common/utils.py
