@@ -61,7 +61,9 @@ class BrowserManager:
                 mem_high = False
                 try:
                     import psutil
-                    if psutil.virtual_memory().percent > 88:
+                    import sys
+                    mem_thresh = 60.0 if sys.platform.startswith("linux") else 88.0
+                    if psutil.virtual_memory().percent > mem_thresh:
                         mem_high = True
                 except Exception:
                     pass
@@ -69,6 +71,7 @@ class BrowserManager:
                 if self.nav_count >= self.max_navigations or mem_high:
                     logger.info(f"BROWSER_MGR: Recycling browser after {self.nav_count} navigations (mem_high={mem_high})")
                     old_browser = self._browser
+                    old_camoufox = self._camoufox
                     self._browser = None
                     self._camoufox = None
                     self.nav_count = 0
@@ -79,18 +82,29 @@ class BrowserManager:
                                 await old_browser.close()
                             except Exception as e:
                                 logger.warning(f"BROWSER_MGR: Error closing old browser: {e}")
+                            if old_camoufox:
+                                try:
+                                    await old_camoufox.__aexit__(None, None, None)
+                                except Exception as e:
+                                    logger.warning(f"BROWSER_MGR: Error exiting camoufox context: {e}")
                         else:
-                            self._pending_close.append(old_browser)
-                            async def _delayed_close(b):
+                            self._pending_close.append((old_browser, old_camoufox))
+                            async def _delayed_close(b, c):
                                 try:
                                     await asyncio.sleep(self.grace_period)
-                                    await b.close()
-                                except Exception as e:
-                                    logger.warning(f"BROWSER_MGR: Error during graceful close of old browser: {e}")
+                                    try:
+                                        await b.close()
+                                    except Exception as e:
+                                        logger.warning(f"BROWSER_MGR: Error during graceful close of old browser: {e}")
+                                    if c:
+                                        try:
+                                            await c.__aexit__(None, None, None)
+                                        except Exception as e:
+                                            logger.warning(f"BROWSER_MGR: Error during delayed camoufox exit: {e}")
                                 finally:
-                                    if b in self._pending_close:
-                                        self._pending_close.remove(b)
-                            asyncio.create_task(_delayed_close(old_browser))
+                                    if (b, c) in self._pending_close:
+                                        self._pending_close.remove((b, c))
+                            asyncio.create_task(_delayed_close(old_browser, old_camoufox))
 
             if self._browser is None:
                 logger.info("BROWSER_MGR: Launching fresh AsyncCamoufox instance...")
@@ -117,12 +131,23 @@ class BrowserManager:
                 except Exception:
                     pass
                 self._browser = None
+            if self._camoufox is not None:
+                try:
+                    await self._camoufox.__aexit__(None, None, None)
+                except Exception:
+                    pass
                 self._camoufox = None
-            for b in list(self._pending_close):
+            for item in list(self._pending_close):
+                b, c = item if isinstance(item, tuple) else (item, None)
                 try:
                     await b.close()
                 except Exception:
                     pass
+                if c:
+                    try:
+                        await c.__aexit__(None, None, None)
+                    except Exception:
+                        pass
             self._pending_close.clear()
 
 # Shared browser semaphore to prevent CPU spikes across engines

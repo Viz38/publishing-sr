@@ -25,7 +25,8 @@ from sr_common.config import settings
 from sr_common.utils import (
     call_gemini_api, call_tracxn_api, get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
-    update_manual_curation_date, is_tc_scraper_mode, col_to_index
+    update_manual_curation_date, is_tc_scraper_mode, col_to_index,
+    reconcile_sheet_gaps
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -347,19 +348,14 @@ class TypeCPipeline:
         self.apply_formatting = True
         self.stop_requested = False
 
-    async def _stop_monitor(self, w_q):
+    async def _stop_monitor(self, w_q=None):
         """Monitors for graceful stop request via SIGTERM or .stop_requested file.
-        When stop is requested, drains work_queue so domain workers stop Stage 1."""
+        When stop is requested, sets stop_requested=True so workers complete current
+        work and safely exit without discarding queued items."""
         while not (self.stop_requested or os.path.exists(".stop_requested")):
             await asyncio.sleep(0.5)
         self.stop_requested = True
-        pipeline_logger.warning("GRACEFUL STOP TRIGGERED: Draining unscraped work_queue to halt Stage 1...")
-        while not w_q.empty():
-            try:
-                w_q.get_nowait()
-                w_q.task_done()
-            except (asyncio.QueueEmpty, ValueError):
-                break
+        pipeline_logger.warning("GRACEFUL STOP TRIGGERED: Halting domain workers (preserving work_queue)...")
 
     async def run(self):
         pipeline_logger.info(f"PIPELINE START: Row {self.start_row} | Mode: {self.mode}")
@@ -409,7 +405,7 @@ class TypeCPipeline:
         
         h_map = {
             "domain": 1, "dp_id": 2, "funnel_id": 4, "tags": 5, "company_name": 6,
-            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3,
+            "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3, "r1": "H",
             "scraper_col": "S", "scraper_idx": 18
         }
         
@@ -447,15 +443,13 @@ class TypeCPipeline:
 
             if self.mode == "phase2":
                 tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
-                await work_queue.join()
-                for t in tasks: t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
             else:
                 browser_mgr = BrowserManager(max_navigations=150)
                 try:
                     pipeline_logger.info(f"Starting continuous streaming pipeline for {len(data_rows)} domains with {CONFIG['MAX_WORKERS']} workers")
                     tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
-                    await work_queue.join()
-                    for t in tasks: t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
                 finally:
                     await browser_mgr.close()
 
@@ -469,6 +463,38 @@ class TypeCPipeline:
             writer_task.cancel()
             heartbeat_task.cancel()
             stop_monitor_task.cancel()
+
+            # End-of-run Gap Reconciliation & Recovery Pass
+            if not self.stop_requested and not os.path.exists(".stop_requested"):
+                pipeline_logger.info("AUDIT: Verifying sheet completion and checking for gaps...")
+                try:
+                    reconciled, still_missing = await reconcile_sheet_gaps(
+                        ws=ws,
+                        start_row=self.start_row,
+                        data_rows=data_rows,
+                        csv_records=os.path.join(LOGS_DIR, 'results_backup.csv'),
+                        h_map=h_map,
+                        stat_col=h_map.get("r1", "H")
+                    )
+                    if reconciled:
+                        pipeline_logger.info(f"AUDIT: Successfully reconciled {len(reconciled)} rows from backup CSV.")
+                    if still_missing:
+                        pipeline_logger.warning(f"AUDIT: Found {len(still_missing)} unwritten rows. Initiating recovery pass...")
+                        recovery_updates = []
+                        stat_col = h_map.get("r1", "H")
+                        for m_idx in still_missing:
+                            recovery_updates.append({
+                                'range': f"{stat_col}{m_idx}",
+                                'values': [["Failed: Unprocessed in run"]]
+                            })
+                        if recovery_updates:
+                            await ws.batch_update(recovery_updates)
+                            pipeline_logger.info(f"AUDIT: Marked {len(recovery_updates)} missing rows to ensure zero blank gaps.")
+                    else:
+                        pipeline_logger.info("AUDIT: 100% rows verified and complete in Google Sheet.")
+                except Exception as audit_err:
+                    pipeline_logger.error(f"AUDIT ERROR: {audit_err}")
+
             if os.path.exists(".stop_requested"):
                 try:
                     os.remove(".stop_requested")

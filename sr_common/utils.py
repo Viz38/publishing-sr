@@ -4,10 +4,11 @@ import json
 import logging
 import re
 import os
+import sys
 import random
 import math
 import time
-from typing import Optional, Dict, Tuple, Any, Union
+from typing import Optional, Dict, Tuple, Any, Union, List
 from .config import settings
 from .models import LLMResult
 
@@ -18,8 +19,14 @@ class SystemHealthMonitor:
     Monitors CPU and RAM usage to prevent system saturation.
     Ensures workers only process domains when resources are within safe limits.
     Uses non-blocking cpu_percent(interval=None) to avoid stalling the async event loop.
+    Defaults to 60% on Linux to prevent OS thrashing, and 90%/88% on macOS.
     """
-    def __init__(self, cpu_threshold: float = 90.0, mem_threshold: float = 88.0):
+    def __init__(self, cpu_threshold: Optional[float] = None, mem_threshold: Optional[float] = None):
+        is_linux = sys.platform.startswith("linux")
+        if cpu_threshold is None:
+            cpu_threshold = 60.0 if is_linux else 90.0
+        if mem_threshold is None:
+            mem_threshold = 60.0 if is_linux else 88.0
         self.cpu_threshold = cpu_threshold
         self.mem_threshold = mem_threshold
         import psutil
@@ -28,11 +35,20 @@ class SystemHealthMonitor:
         self._psutil.cpu_percent(interval=None)
 
     def is_healthy(self) -> Tuple[bool, str]:
+        cpu = self._psutil.cpu_percent(interval=None)
+        if cpu > self.cpu_threshold:
+            return False, f"CPU too high ({cpu}%)"
+
         mem = self._psutil.virtual_memory().percent
-        
         if mem > self.mem_threshold:
             import gc
             gc.collect()
+            if sys.platform.startswith("linux"):
+                try:
+                    import ctypes
+                    ctypes.CDLL('libc.so.6').malloc_trim(0)
+                except Exception:
+                    pass
             mem_after = self._psutil.virtual_memory().percent
             if mem_after > self.mem_threshold:
                 return False, f"Memory too high ({mem_after}%)"
@@ -47,12 +63,17 @@ class SystemHealthMonitor:
             if healthy:
                 break
                 
-            if fast_fail_ram and "Memory" in reason:
+            if "Memory" in reason:
                 import gc
                 gc.collect()
-                if logger:
-                    logger.error(f"HEALTH_GATE: Fast failing on RAM saturation ({reason}) to recycle resources.")
-                raise MemoryError(f"Resource saturation: {reason}")
+                if sys.platform.startswith("linux"):
+                    try:
+                        import ctypes
+                        ctypes.CDLL('libc.so.6').malloc_trim(0)
+                    except Exception:
+                        pass
+                if fast_fail_ram and logger:
+                    logger.warning(f"HEALTH_GATE: RAM saturation observed ({reason}). Reclaiming memory and applying backoff.")
             
             if timeout is not None and (time.time() - start_time) > timeout:
                 if logger:
@@ -537,18 +558,22 @@ def get_dynamic_max_workers(ram_per_worker_gb: float = 0.45) -> int:
     Calculates the maximum number of concurrent workers based on AVAILABLE system resources.
     Assumes ~450MB per worker (handling full HTML, subpages, and Gemini responses).
     Leaves at least 2GB of headroom for the OS and desktop UI.
-    Enforces safe limit and respects CONFIGURED_MIN_WORKERS and CONFIGURED_MAX_WORKERS.
+    On Linux: strictly capped at 6 workers max and cores * 2 to prevent CPU saturation.
+    On macOS / other OS: scales dynamically up to configured_max and cores * 4.
     """
     import psutil
     from .config import settings
     
+    is_linux = sys.platform.startswith("linux")
     configured_max = getattr(settings, "CONFIGURED_MAX_WORKERS", 12)
+    if is_linux:
+        configured_max = min(configured_max, 6)
     configured_min = getattr(settings, "CONFIGURED_MIN_WORKERS", 1)
     cores = psutil.cpu_count(logical=False) or 2
     available_mem_gb = psutil.virtual_memory().available / (1024**3)
     
-    # 1. CPU-based scaling (4 workers per physical core)
-    cpu_limit = cores * 4
+    # 1. CPU-based scaling (2 per core on Linux to preserve UI, 4 on macOS)
+    cpu_limit = cores * 2 if is_linux else cores * 4
     
     # 2. RAM-based scaling (Leave at least 2GB for the OS and desktop)
     ram_limit = int(max(0, available_mem_gb - 2.0) / ram_per_worker_gb)
@@ -557,6 +582,101 @@ def get_dynamic_max_workers(ram_per_worker_gb: float = 0.45) -> int:
     safe_limit = max(1, min(configured_max, min(cpu_limit, ram_limit)))
     
     return max(configured_min, safe_limit)
+
+
+async def reconcile_sheet_gaps(
+    ws,
+    start_row: int,
+    data_rows: list,
+    csv_records: Any = None,
+    h_map: Optional[dict] = None,
+    stat_col: Optional[str] = None
+) -> Tuple[List[int], List[int]]:
+    """
+    Audits the Google Sheet for missing/blank rows after processing.
+    Attempts to restore missing rows from CSV backup records.
+    Returns:
+        reconciled: List[int] of row indices that were successfully restored/written to the sheet.
+        still_missing: List[int] of row indices that remain blank in both sheet and CSV.
+    """
+    h_map = h_map or {}
+    stat_col = stat_col or h_map.get("r1", "H")
+    if not data_rows:
+        return [], []
+        
+    row_indices = [idx for idx, _ in data_rows]
+    min_row = min(row_indices)
+    max_row = max(row_indices)
+    
+    # Read existing status values from sheet
+    range_str = f"{stat_col}{min_row}:{stat_col}{max_row}"
+    try:
+        values = await ws.get_values(range_str)
+    except TypeError:
+        values = await ws.get_values()
+    except Exception as e:
+        logger.error(f"Error reading status column {range_str} during gap audit: {e}")
+        values = []
+        
+    gap_rows = []
+    for idx, row_data in data_rows:
+        offset = idx - min_row
+        val = ""
+        if values and 0 <= offset < len(values):
+            row_val = values[offset]
+            if row_val and len(row_val) > 0:
+                val = str(row_val[0]).strip()
+        if not val:
+            gap_rows.append(idx)
+            
+    if not gap_rows:
+        return [], []
+        
+    records_map = {}
+    if isinstance(csv_records, dict):
+        records_map = csv_records
+    else:
+        csv_path = csv_records if isinstance(csv_records, str) else os.path.join(os.path.dirname(os.path.dirname(__file__)), "Logs", "results_backup.csv")
+        if os.path.exists(csv_path):
+            import csv
+            try:
+                with open(csv_path, "r", encoding="utf-8") as f:
+                    reader = csv.reader(f)
+                    for r in reader:
+                        if not r or r[0] == "Range":
+                            continue
+                        range_name = r[0]
+                        m = re.search(r'\d+', range_name)
+                        if m:
+                            row_num = int(m.group())
+                            records_map.setdefault(row_num, []).append({
+                                "range": range_name,
+                                "values": [r[1:]]
+                            })
+            except Exception as e:
+                logger.error(f"Error loading backup CSV {csv_path}: {e}")
+                
+    reconciled = []
+    still_missing = []
+    batch_payload = []
+    
+    for idx in gap_rows:
+        if idx in records_map:
+            batch_payload.extend(records_map[idx])
+            reconciled.append(idx)
+        else:
+            still_missing.append(idx)
+            
+    if batch_payload:
+        try:
+            await ws.batch_update(batch_payload)
+            logger.info(f"AUDIT: Flushed {len(batch_payload)} reconciled ranges to sheet for rows: {reconciled}")
+        except Exception as e:
+            logger.error(f"AUDIT: Failed to push reconciled updates to sheet: {e}")
+            still_missing.extend(reconciled)
+            reconciled = []
+            
+    return reconciled, still_missing
 
 
 async def update_manual_curation_date(session: aiohttp.ClientSession, company_id: str, limiter, headers: dict) -> tuple:

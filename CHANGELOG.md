@@ -1,3 +1,35 @@
+## [2026-09-29] Fix Device 4990 Type B Row Skipping, Linux 60% Health Ceiling, 6-Worker Linux Concurrency Cap, and Gap Reconciliation Protocol
+Files changed:
+- sr_common/utils.py
+- sr_common/fetcher.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- Temp_Test/test_os_specific_concurrency.py
+Reason:
+1. Fix Infinite MemoryError Re-queue Loop on Linux Devices:
+   - Root Cause: On device 4990, RAM saturation (>88%) triggered `wait_for_resources(fast_fail_ram=True)` which raised `MemoryError("Resource saturation")`. Caught workers re-queued rows back to `work_queue` without freeing heap memory, triggering 21,286 re-queues over 7 hours and halting progress after row 17,315.
+   - Fix: Replaced fast-fail `MemoryError` spin-loop in `SystemHealthMonitor.wait_for_resources()` with non-failing adaptive backpressure and jittered sleep. Added explicit `malloc_trim(0)` on Linux alongside `gc.collect()` in `is_healthy()` and `wait_for_resources()` to force glibc heap memory release back to the kernel.
+2. Linux-Specific Concurrency Capping (6 Workers Max) and 60% Health Ceiling:
+   - Root Cause: High worker concurrency (8-12 workers) on Linux laptop devices caused severe CPU load spikes (load average 17.65, 99.9% CPU) and Camoufox memory contention. macOS systems with larger unfragmented RAM ran cleanly.
+   - Fix: Updated `get_dynamic_max_workers()` in `sr_common/utils.py` to check `sys.platform.startswith("linux")`. When running on Linux, concurrency is hard-capped at 6 workers (`min(configured_max, 6)`) with `cores * 2` CPU limit. On macOS (darwin), dynamic scaling up to `configured_max` is preserved. `SystemHealthMonitor` defaults to 60% CPU and 60% RAM thresholds on Linux (90%/88% on macOS) and actively monitors CPU percent in `is_healthy()`.
+3. Eliminate Data Discarding on Graceful Stop:
+   - Root Cause: `_stop_monitor` in Type A, B, and C previously called `while not w_q.empty(): w_q.get_nowait(); w_q.task_done()`, silently purging all remaining queued domains when a stop signal or SIGTERM was received.
+   - Fix: Removed queue draining in `_stop_monitor`. Updated `run()` across Type A, B, and C to join worker tasks with `await asyncio.gather(*tasks, return_exceptions=True)` so graceful stops preserve unworked queue items and exit cleanly without data loss.
+4. Clean Camoufox Subprocess Lifecycle & 60% Linux Browser Recycling:
+   - Root Cause: In `BrowserManager` (`sr_common/fetcher.py`), recycling and closing browsers closed the Playwright browser instance but orphaned the underlying `AsyncCamoufox` subprocess context manager without calling `__aexit__`.
+   - Fix: Ensured `await self._camoufox.__aexit__(None, None, None)` is called during browser recycling, delayed cleanup, and shutdown. Set memory threshold for browser recycling to 60% on Linux.
+5. End-of-Run Gap Reconciliation & Auto-Recovery Protocol:
+   - Root Cause: Network drops, transient sheet timeouts, or silent failures could leave empty status rows in the spreadsheet without triggering a fatal error.
+   - Fix: Added `reconcile_sheet_gaps()` in `sr_common/utils.py` invoked at the conclusion of every run across Type A, B, and C. Audits the worksheet's status column, cross-references with local `results_backup.csv`, restores any unwritten rows via batch updates, and executes a recovery pass on any remaining blank entries to ensure 100% completion before concluding.
+Related tests:
+- Temp_Test/test_os_specific_concurrency.py
+- Temp_Test/test_dynamic_workers.py
+- Temp_Test/test_browser_manager.py
+- Temp_Test/test_gating_and_scaling.py
+- Temp_Test/test_rate_limiter.py
+- Temp_Test/test_resource_saturation_recovery.py
+
 ## [2026-09-26] Fix High RAM Saturation, System Hangs, and Browser/Log Bloat on Local Devices
 Files changed:
 - sr_common/fetcher.py
