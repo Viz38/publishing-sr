@@ -1,3 +1,37 @@
+## [2026-09-29] Performance Hardening: Pre-computed Lookups, Deterministic Mapping, TCP Pooling, Cache Debouncing & Log Rotation
+Files changed:
+- sr_common/config.py
+- sr_common/utils.py
+- TypeA/main.py
+- TypeB/main.py
+- TypeC/main.py
+- Temp_Test/test_hardening_optimizations.py
+Reason:
+1. Pre-computed Lookup Maps & Pre-formatted BM Trees:
+   - In `TypeB/main.py` and `TypeA/main.py`, pre-calculated `bm_paths_str` and `serial_to_bm` (and `1stLevel_serial_map` / `1stLevel_str`) when loading Business Model worksheets during startup.
+   - Eliminated redundant per-domain JSON-serialization and loop traversals in `process_domain_stage1()`, removing CPU spikes and boosting throughput.
+2. Deterministic Column Mapping:
+   - In `TypeA/main.py` and `TypeB/main.py`, introduced `get_column_mapping(is_shifted: bool)` and replaced heuristic string-matching with direct `h_map = get_column_mapping(is_shifted=is_shifted)` gating based on headers detected at row 1.
+   - Prevents mismatched row writing or fallback misindexing if Google Sheets header text deviates slightly.
+3. High-Throughput HTTP Connection Pooling:
+   - Added `get_optimized_tcp_connector()` in `sr_common/utils.py` configured with `limit=100`, `ttl_dns_cache=300`, and `keepalive_timeout=60`.
+   - Wired this optimized connector into `aiohttp.ClientSession` across `TypeA/main.py`, `TypeB/main.py`, and `TypeC/main.py` to reuse TCP connections and DNS resolutions across thousands of concurrent API requests.
+4. Deduplicated Cache Manager & Debounced Stats Persistence:
+   - Consolidated `TrackingCacheManager` into `sr_common/utils.py` and removed redundant implementations from `TypeA/main.py`, `TypeB/main.py`, and `TypeC/main.py`.
+   - Implemented a 30-second debounce timer on `save_stats()` so disk I/O occurs only on cache creation or every 30 seconds rather than on every single cache hit.
+5. Cached Tracking Worksheet Handles:
+   - Added `_tracking_ws` cached handle to `sheet_writer` in `TypeA/main.py`, `TypeB/main.py`, and `TypeC/main.py`.
+   - Reuses existing worksheet handles and eliminates hundreds of redundant Google Drive API metadata lookup calls per run.
+6. Rotating File Handlers & Clean Configuration:
+   - Replaced unbounded standard `FileHandler` loggers in `TypeA/main.py`, `TypeB/main.py`, and `TypeC/main.py` with `RotatingFileHandler` (max 50MB, 5 backup files) to prevent disk space exhaustion during long-running tasks.
+   - Cached `ctypes.CDLL('libc.so.6')` at module level in `sr_common/utils.py` to eliminate repetitive dynamic library loading overhead during memory trimming.
+   - Replaced deprecated `self.__fields__` with `self.__class__.model_fields` in `sr_common/config.py` to eliminate Pydantic V2 runtime deprecation warnings.
+Related tests:
+- Temp_Test/test_hardening_optimizations.py
+- Temp_Test/test_os_specific_concurrency.py
+- Temp_Test/test_dynamic_workers.py
+- Temp_Test/test_gating_and_scaling.py
+
 ## [2026-09-29] Fix Device 4990 Type B Row Skipping, Linux 60% Health Ceiling, 6-Worker Linux Concurrency Cap, and Gap Reconciliation Protocol
 Files changed:
 - sr_common/utils.py

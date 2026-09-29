@@ -17,6 +17,7 @@ import time
 import psutil
 import signal
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from gspread_formatting import set_frozen
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 from urllib.parse import urlparse
@@ -28,7 +29,7 @@ from sr_common.utils import (
     get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
     update_manual_curation_date, is_tc_scraper_mode, col_to_index,
-    reconcile_sheet_gaps
+    reconcile_sheet_gaps, TrackingCacheManager, get_optimized_tcp_connector
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -73,7 +74,7 @@ STOP_FILE = os.path.join(BASE_DIR, ".stop_requested")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 def setup_logger(name, log_file, level=logging.INFO):
-    handler = logging.FileHandler(log_file, mode='a')
+    handler = RotatingFileHandler(log_file, maxBytes=50*1024*1024, backupCount=5, encoding='utf-8')
     handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -92,7 +93,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOGS_DIR, 'api.logs'), mode="a")
+        RotatingFileHandler(os.path.join(LOGS_DIR, 'api.logs'), maxBytes=50*1024*1024, backupCount=5, encoding='utf-8')
     ]
 )
 
@@ -132,123 +133,28 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
-class TrackingCacheManager(GeminiCacheManager):
-    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None):
-        super().__init__(api_key, max_size)
-        self.stats_filepath = stats_filepath or os.path.join(LOGS_DIR, "cache_stats.json")
-        self.stats = {
-            "created_count": 0,
-            "used_count": 0,
-            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
+def get_column_mapping(is_shifted: bool) -> Dict[str, Any]:
+    """Returns deterministic column mapping based on whether the sheet is shifted."""
+    if is_shifted:
+        return {
+            "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
+            "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 21,
+            "r1": "J", "r2": "T", "r3": "U", # Shifted: J-T, U-W
+            "raw_data": 23, # Col X
+            "raw_data_col": "X",
+            "scraper_col": "Y",
+            "scraper_idx": 24
         }
-        self.stats_lock = asyncio.Lock()
-        
-        # Write initial empty stats JSON on startup
-        try:
-            with open(self.stats_filepath, "w", encoding="utf-8") as f:
-                json.dump({
-                    "summary": {"total_created": 0, "total_used": 0},
-                    "caches": []
-                }, f, indent=4)
-        except Exception:
-            pass
-
-    async def save_stats(self):
-        async with self.stats_lock:
-            now = time.time()
-            caches_list = []
-            
-            # Iterate through the caches we have tracked
-            for key, info in self.stats.get("caches", {}).items():
-                expiry = info.get("expiry", 0)
-                is_expired = now >= expiry
-                caches_list.append({
-                    "key": key,
-                    "cache_id": info.get("cache_name"),
-                    "created_at": info.get("created_at"),
-                    "used_count": info.get("hits", 0),
-                    "expiry_status": "expired" if is_expired else "live",
-                    "expiry_raw": expiry
-                })
-                
-            data_to_save = {
-                "summary": {
-                    "total_created": self.stats.get("created_count", 0),
-                    "total_used": self.stats.get("used_count", 0)
-                },
-                "caches": caches_list
-            }
-            try:
-                temp_path = self.stats_filepath + ".tmp"
-                with open(temp_path, "w", encoding="utf-8") as f:
-                    json.dump(data_to_save, f, indent=4)
-                import os
-                os.replace(temp_path, self.stats_filepath)
-            except Exception as e:
-                pipeline_logger.error(f"Error saving cache stats: {e}")
-
-    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
-        # Perform lazy sync if needed before checking already_existed
-        if not self._synced_remote:
-            async with self.lock:
-                if not self._synced_remote:
-                    await self.sync_remote_caches(session)
-
-        # Check if it was already valid in memory before this call
-        current_time = time.time()
-        already_existed = False
-        if key in self.caches:
-            cache_name, expiry = self.caches[key]
-            if cache_name and current_time < (expiry - 300):
-                already_existed = True
-
-        # Call the original method to get or create
-        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
-        
-        if cache_name:
-            async with self.stats_lock:
-                now = time.time()
-                ttl_seconds = int(ttl.replace("s", ""))
-                
-                caches_stats = self.stats.setdefault("caches", {})
-                info = caches_stats.get(key)
-                
-                # It is a new creation if it didn't exist in memory AND hasn't already been registered in this run
-                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
-                
-                if is_new_creation:
-                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
-                    caches_stats[key] = {
-                        "cache_name": cache_name,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "expiry": now + ttl_seconds,
-                        "hits": 0
-                    }
-                else:
-                    # It already existed, so this call reused it
-                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
-                    
-                    # Ensure we track it in the list for this run
-                    if key not in caches_stats:
-                        caches_stats[key] = {
-                            "cache_name": cache_name,
-                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "expiry": now + ttl_seconds,
-                            "hits": 0
-                        }
-                    caches_stats[key]["hits"] += 1
-            
-            await self.save_stats()
-            
-        return cache_name
-
-    async def invalidate(self, key: str):
-        await super().invalidate(key)
-        async with self.stats_lock:
-            caches_stats = self.stats.setdefault("caches", {})
-            if key in caches_stats:
-                caches_stats[key]["expiry"] = 0 # Force expired
-        await self.save_stats()
+    else:
+        return {
+            "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
+            "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15,
+            "r1": "H", "r2": "S", "r3": "T", # Standard: H-S, T-V
+            "raw_data": 22, # Col W
+            "raw_data_col": "W",
+            "scraper_col": "X",
+            "scraper_idx": 23
+        }
 
 
 async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager) -> Dict:
@@ -349,7 +255,8 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
     pipeline_logger.info(f"PROCESS: Running BM prediction for {domain}")
     bm_res, bm_name, bm_id, f_chk, in2, out2, think2 = "", "", None, "No", 0, 0, 0
     if feed in bm_paths:
-        bm_paths_str = "\n".join([" ".join(map(str, r)) for r in bm_paths[feed]["data"]])
+        bm_entry = bm_paths[feed]
+        bm_paths_str = bm_entry.get("str") or "\n".join([" ".join(map(str, r)) for r in bm_entry.get("data", [])])
         bm_p = prompts[3].replace("XX", ld).replace("BMPathstr", bm_paths_str).replace("YY", f_def)
         res_bm_obj = await call_gemini_api(session, bm_p, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
             
@@ -363,7 +270,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             if m:
                 f_chk = "Yes"
                 serial_num = int(m.group(0))
-                serial_to_bm = {int(r[0]): r[1] for r in bm_paths[feed]["data"]}
+                serial_to_bm = bm_entry.get("serial_map") or {int(r[0]): r[1] for r in bm_entry.get("data", [])}
                 bm_name = serial_to_bm.get(serial_num, "")
                 if bm_name:
                     bm_id = bm_map.get(bm_name)
@@ -458,32 +365,12 @@ class TypeBPipeline:
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
-        # Determine mapping based on the first data row
+        # Determine mapping based on whether the sheet is shifted
         if data_rows:
-            _, first_row = data_rows[0]
-            if first_row[1].strip() in ["TypeA", "TypeB", "TypeC", "Type A", "Type B", "Type C"]:
-                # Shifted mapping (Columns shifted right by 1)
-                h_map = {
-                    "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
-                    "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 21,
-                    "r1": "J", "r2": "T", "r3": "U", # Shifted: J-T, U-W
-                    "raw_data": 23, # Col X
-                    "raw_data_col": "X",
-                    "scraper_col": "Y",
-                    "scraper_idx": 24
-                }
+            h_map = get_column_mapping(is_shifted=is_shifted)
+            if is_shifted:
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
-                # Standard mapping
-                h_map = {
-                    "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
-                    "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15,
-                    "r1": "H", "r2": "S", "r3": "T", # Standard: H-S, T-V
-                    "raw_data": 22, # Col W
-                    "raw_data_col": "W",
-                    "scraper_col": "X",
-                    "scraper_idx": 23
-                }
                 pipeline_logger.info("Detected STANDARD column mapping (Index 1 for Domain)")
         else:
             h_map = {}
@@ -500,6 +387,9 @@ class TypeBPipeline:
             f = r[1].split(">")[0]
             if f not in bm_paths: bm_paths[f] = {"data": []}
             bm_paths[f]["data"].append([len(bm_paths[f]["data"])+1, r[1], r[3]])
+        for f, obj in bm_paths.items():
+            obj["str"] = "\n".join([" ".join(map(str, r)) for r in obj["data"]])
+            obj["serial_map"] = {int(r[0]): r[1] for r in obj["data"]}
         f_defs = {}
         for sid in [self.config["FEED_DEF_SHEET_ID_1"], self.config["FEED_DEF_SHEET_ID_2"]]:
             try:
@@ -516,8 +406,8 @@ class TypeBPipeline:
             if len(row) > h_map["skip"] and row[h_map["skip"]] == "Yes": continue
             filtered_data_rows.append((idx, row))
 
-        cache_manager = TrackingCacheManager(settings.TYPEB_GEMINI_API_KEY)
-        async with aiohttp.ClientSession() as session:
+        cache_manager = TrackingCacheManager(settings.TYPEB_GEMINI_API_KEY, stats_filepath=os.path.join(LOGS_DIR, "cache_stats.json"))
+        async with aiohttp.ClientSession(connector=get_optimized_tcp_connector()) as session:
             work_queue, result_queue, tracxn_queue = asyncio.Queue(), asyncio.Queue(), asyncio.Queue()
             for item in filtered_data_rows:
                 await work_queue.put(item)
@@ -860,6 +750,14 @@ class TypeBPipeline:
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         updates = []
         last_flush = time.time()
+        _tracking_ws = None
+
+        async def _get_tracking_ws():
+            nonlocal _tracking_ws
+            if _tracking_ws is None:
+                t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
+                _tracking_ws = await t_sheet.worksheet(pipeline_name)
+            return _tracking_ws
         
         # Open CSV backup early so it's always available
         import csv
@@ -944,10 +842,15 @@ class TypeBPipeline:
                 
                 if batch_in > 0 or batch_out > 0 or batch_think > 0 or batch_rows > 0:
                     async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
+                        nonlocal _tracking_ws
                         try:
-                            t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
-                            t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                            try:
+                                t_ws = await _get_tracking_ws()
+                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                            except Exception:
+                                _tracking_ws = None
+                                t_ws = await _get_tracking_ws()
+                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0

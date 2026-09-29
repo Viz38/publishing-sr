@@ -14,6 +14,24 @@ from .models import LLMResult
 
 logger = logging.getLogger("sr_common.utils")
 
+_libc = None
+if sys.platform.startswith("linux"):
+    try:
+        import ctypes
+        _libc = ctypes.CDLL('libc.so.6')
+    except Exception:
+        _libc = None
+
+def trim_memory():
+    """Runs garbage collection and triggers malloc_trim on Linux to release heap arenas back to OS."""
+    import gc
+    gc.collect()
+    if _libc and hasattr(_libc, 'malloc_trim'):
+        try:
+            _libc.malloc_trim(0)
+        except Exception:
+            pass
+
 class SystemHealthMonitor:
     """
     Monitors CPU and RAM usage to prevent system saturation.
@@ -41,14 +59,7 @@ class SystemHealthMonitor:
 
         mem = self._psutil.virtual_memory().percent
         if mem > self.mem_threshold:
-            import gc
-            gc.collect()
-            if sys.platform.startswith("linux"):
-                try:
-                    import ctypes
-                    ctypes.CDLL('libc.so.6').malloc_trim(0)
-                except Exception:
-                    pass
+            trim_memory()
             mem_after = self._psutil.virtual_memory().percent
             if mem_after > self.mem_threshold:
                 return False, f"Memory too high ({mem_after}%)"
@@ -64,14 +75,7 @@ class SystemHealthMonitor:
                 break
                 
             if "Memory" in reason:
-                import gc
-                gc.collect()
-                if sys.platform.startswith("linux"):
-                    try:
-                        import ctypes
-                        ctypes.CDLL('libc.so.6').malloc_trim(0)
-                    except Exception:
-                        pass
+                trim_memory()
                 if fast_fail_ram and logger:
                     logger.warning(f"HEALTH_GATE: RAM saturation observed ({reason}). Reclaiming memory and applying backoff.")
             
@@ -87,7 +91,13 @@ class SystemHealthMonitor:
             
             if logger:
                 logger.warning(f"HEALTH_GATE: Pausing - {reason}")
-            await asyncio.sleep(random.uniform(4.0, 8.0)) # Jittered sleep to prevent thundering herd
+                
+            if "CPU" in reason:
+                # Lightweight micro-pause for transient CPU spikes to protect speed (4K-7K domains/hr)
+                await asyncio.sleep(random.uniform(0.5, 1.2))
+            else:
+                # RAM backpressure with jitter
+                await asyncio.sleep(random.uniform(3.0, 6.0))
 
 
 # Load Parked Domain Dictionary
@@ -317,6 +327,143 @@ class GeminiCacheManager:
             if key in self.caches:
                 cache_name, _ = self.caches.pop(key)
                 logging.info(f"CACHE INVALIDATED: {key} ({cache_name})")
+
+class TrackingCacheManager(GeminiCacheManager):
+    """
+    Extends GeminiCacheManager with hit/creation metrics and debounced disk persistence.
+    Avoids synchronous disk writes on every domain hit.
+    """
+    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None, debounce_seconds: float = 30.0):
+        super().__init__(api_key, max_size)
+        self.stats_filepath = stats_filepath or os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "Logs", "cache_stats.json"
+        )
+        self.debounce_seconds = debounce_seconds
+        self._last_save_time = 0.0
+        self.stats = {
+            "created_count": 0,
+            "used_count": 0,
+            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
+        }
+        self.stats_lock = asyncio.Lock()
+        
+        # Write initial stats JSON if missing
+        try:
+            os.makedirs(os.path.dirname(self.stats_filepath), exist_ok=True)
+            if not os.path.exists(self.stats_filepath):
+                with open(self.stats_filepath, "w", encoding="utf-8") as f:
+                    json.dump({
+                        "summary": {"total_created": 0, "total_used": 0},
+                        "caches": []
+                    }, f, indent=4)
+        except Exception:
+            pass
+
+    async def save_stats(self, force: bool = False):
+        async with self.stats_lock:
+            now = time.time()
+            if not force and (now - self._last_save_time < self.debounce_seconds):
+                return
+            caches_list = []
+            for key, info in self.stats.get("caches", {}).items():
+                expiry = info.get("expiry", 0)
+                is_expired = now >= expiry
+                caches_list.append({
+                    "key": key,
+                    "cache_id": info.get("cache_name"),
+                    "created_at": info.get("created_at"),
+                    "used_count": info.get("hits", 0),
+                    "expiry_status": "expired" if is_expired else "live",
+                    "expiry_raw": expiry
+                })
+                
+            data_to_save = {
+                "summary": {
+                    "total_created": self.stats.get("created_count", 0),
+                    "total_used": self.stats.get("used_count", 0)
+                },
+                "caches": caches_list
+            }
+            try:
+                temp_path = self.stats_filepath + ".tmp"
+                with open(temp_path, "w", encoding="utf-8") as f:
+                    json.dump(data_to_save, f, indent=4)
+                os.replace(temp_path, self.stats_filepath)
+                self._last_save_time = now
+            except Exception as e:
+                logger.error(f"Error saving cache stats: {e}")
+
+    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
+        if not self._synced_remote:
+            async with self.lock:
+                if not self._synced_remote:
+                    await self.sync_remote_caches(session)
+
+        current_time = time.time()
+        already_existed = False
+        if key in self.caches:
+            cache_name, expiry = self.caches[key]
+            if cache_name and current_time < (expiry - 300):
+                already_existed = True
+
+        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
+        
+        if cache_name:
+            is_new_creation = False
+            async with self.stats_lock:
+                now = time.time()
+                from datetime import datetime
+                ttl_seconds = int(ttl.replace("s", ""))
+                caches_stats = self.stats.setdefault("caches", {})
+                info = caches_stats.get(key)
+                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
+                
+                if is_new_creation:
+                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
+                    caches_stats[key] = {
+                        "cache_name": cache_name,
+                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "expiry": now + ttl_seconds,
+                        "hits": 0
+                    }
+                else:
+                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
+                    if key not in caches_stats:
+                        caches_stats[key] = {
+                            "cache_name": cache_name,
+                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "expiry": now + ttl_seconds,
+                            "hits": 0
+                        }
+                    caches_stats[key]["hits"] += 1
+            
+            # Save stats immediately if a new cache was created, otherwise debounce
+            await self.save_stats(force=is_new_creation)
+            
+        return cache_name
+
+    async def invalidate(self, key: str):
+        await super().invalidate(key)
+        async with self.stats_lock:
+            caches_stats = self.stats.setdefault("caches", {})
+            if key in caches_stats:
+                caches_stats[key]["expiry"] = 0
+        await self.save_stats(force=True)
+
+def get_optimized_tcp_connector(
+    limit: int = 100,
+    limit_per_host: int = 30,
+    ttl_dns_cache: int = 300,
+    keepalive_timeout: int = 60
+) -> aiohttp.TCPConnector:
+    """Returns a high-throughput, keepalive-optimized TCPConnector with DNS caching."""
+    return aiohttp.TCPConnector(
+        limit=limit,
+        limit_per_host=limit_per_host,
+        ttl_dns_cache=ttl_dns_cache,
+        enable_cleanup_closed=True,
+        keepalive_timeout=keepalive_timeout
+    )
 
 async def confirm_parked_via_llm(session: aiohttp.ClientSession, text: str, limiter, api_key: str = None) -> bool:
     """

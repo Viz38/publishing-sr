@@ -17,6 +17,7 @@ import time
 import psutil
 import signal
 from datetime import datetime
+from logging.handlers import RotatingFileHandler
 from typing import Dict, List, Set, Tuple, Optional, Union, Any
 from urllib.parse import urlparse
 from dotenv import load_dotenv
@@ -26,7 +27,7 @@ from sr_common.utils import (
     call_gemini_api, call_tracxn_api, get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
     update_manual_curation_date, is_tc_scraper_mode, col_to_index,
-    reconcile_sheet_gaps
+    reconcile_sheet_gaps, TrackingCacheManager, get_optimized_tcp_connector
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -65,7 +66,7 @@ LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Logs')
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 def setup_logger(name, log_file, level=logging.INFO):
-    handler = logging.FileHandler(log_file, mode='a')
+    handler = RotatingFileHandler(log_file, maxBytes=50*1024*1024, backupCount=5, encoding='utf-8')
     handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
     logger = logging.getLogger(name)
     logger.setLevel(level)
@@ -84,7 +85,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(LOGS_DIR, 'api.logs'), mode="a")
+        RotatingFileHandler(os.path.join(LOGS_DIR, 'api.logs'), maxBytes=50*1024*1024, backupCount=5, encoding='utf-8')
     ]
 )
 
@@ -124,123 +125,6 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
-class TrackingCacheManager(GeminiCacheManager):
-    def __init__(self, api_key: str, max_size: int = 50, stats_filepath: str = None):
-        super().__init__(api_key, max_size)
-        self.stats_filepath = stats_filepath or os.path.join(LOGS_DIR, "cache_stats.json")
-        self.stats = {
-            "created_count": 0,
-            "used_count": 0,
-            "caches": {}  # key -> {cache_name, created_at, expiry, hits}
-        }
-        self.stats_lock = asyncio.Lock()
-        
-        # Write initial empty stats JSON on startup
-        try:
-            with open(self.stats_filepath, "w", encoding="utf-8") as f:
-                json.dump({
-                    "summary": {"total_created": 0, "total_used": 0},
-                    "caches": []
-                }, f, indent=4)
-        except Exception:
-            pass
-
-    async def save_stats(self):
-        async with self.stats_lock:
-            now = time.time()
-            caches_list = []
-            
-            # Iterate through the caches we have tracked
-            for key, info in self.stats.get("caches", {}).items():
-                expiry = info.get("expiry", 0)
-                is_expired = now >= expiry
-                caches_list.append({
-                    "key": key,
-                    "cache_id": info.get("cache_name"),
-                    "created_at": info.get("created_at"),
-                    "used_count": info.get("hits", 0),
-                    "expiry_status": "expired" if is_expired else "live",
-                    "expiry_raw": expiry
-                })
-                
-            data_to_save = {
-                "summary": {
-                    "total_created": self.stats.get("created_count", 0),
-                    "total_used": self.stats.get("used_count", 0)
-                },
-                "caches": caches_list
-            }
-            try:
-                temp_path = self.stats_filepath + ".tmp"
-                with open(temp_path, "w", encoding="utf-8") as f:
-                    json.dump(data_to_save, f, indent=4)
-                import os
-                os.replace(temp_path, self.stats_filepath)
-            except Exception as e:
-                logging.error(f"Error saving cache stats: {e}")
-
-    async def get_or_create(self, session: aiohttp.ClientSession, key: str, system_instruction: str, ttl: str = "3600s") -> Optional[str]:
-        # Perform lazy sync if needed before checking already_existed
-        if not self._synced_remote:
-            async with self.lock:
-                if not self._synced_remote:
-                    await self.sync_remote_caches(session)
-
-        # Check if it was already valid in memory before this call
-        current_time = time.time()
-        already_existed = False
-        if key in self.caches:
-            cache_name, expiry = self.caches[key]
-            if cache_name and current_time < (expiry - 300):
-                already_existed = True
-
-        # Call the original method to get or create
-        cache_name = await super().get_or_create(session, key, system_instruction, ttl)
-        
-        if cache_name:
-            async with self.stats_lock:
-                now = time.time()
-                ttl_seconds = int(ttl.replace("s", ""))
-                
-                caches_stats = self.stats.setdefault("caches", {})
-                info = caches_stats.get(key)
-                
-                # It is a new creation if it didn't exist in memory AND hasn't already been registered in this run
-                is_new_creation = (not already_existed) and (info is None or info.get("cache_name") != cache_name)
-                
-                if is_new_creation:
-                    self.stats["created_count"] = self.stats.get("created_count", 0) + 1
-                    caches_stats[key] = {
-                        "cache_name": cache_name,
-                        "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "expiry": now + ttl_seconds,
-                        "hits": 0
-                    }
-                else:
-                    # It already existed, so this call reused it
-                    self.stats["used_count"] = self.stats.get("used_count", 0) + 1
-                    
-                    # Ensure we track it in the list for this run
-                    if key not in caches_stats:
-                        caches_stats[key] = {
-                            "cache_name": cache_name,
-                            "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                            "expiry": now + ttl_seconds,
-                            "hits": 0
-                        }
-                    caches_stats[key]["hits"] += 1
-            
-            await self.save_stats()
-            
-        return cache_name
-
-    async def invalidate(self, key: str):
-        await super().invalidate(key)
-        async with self.stats_lock:
-            caches_stats = self.stats.setdefault("caches", {})
-            if key in caches_stats:
-                caches_stats[key]["expiry"] = 0 # Force expired
-        await self.save_stats()
 
 async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
     domain = row[h_map["domain"]]
@@ -427,8 +311,8 @@ class TypeCPipeline:
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
 
-        cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY)
-        async with aiohttp.ClientSession() as session:
+        cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY, stats_filepath=os.path.join(LOGS_DIR, "cache_stats.json"))
+        async with aiohttp.ClientSession(connector=get_optimized_tcp_connector()) as session:
             work_queue, result_queue, tracxn_queue = asyncio.Queue(), asyncio.Queue(), asyncio.Queue()
             for idx, row in data_rows:
                 await work_queue.put((idx, row))
@@ -767,6 +651,14 @@ class TypeCPipeline:
         batch_in, batch_out, batch_think, batch_rows, batch_calls = 0, 0, 0, 0, 0
         updates = []
         last_flush = time.time()
+        _tracking_ws = None
+
+        async def _get_tracking_ws():
+            nonlocal _tracking_ws
+            if _tracking_ws is None:
+                t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
+                _tracking_ws = await t_sheet.worksheet(pipeline_name)
+            return _tracking_ws
         
         # Open CSV backup early so it's always available
         import csv
@@ -852,10 +744,15 @@ class TypeCPipeline:
                 if (batch_in or batch_out or batch_calls):
                     b_in, b_out, b_think, b_rows, b_calls = batch_in, batch_out, batch_think, batch_rows, batch_calls
                     async def _update_tracking(b_in, b_out, b_think, b_rows, b_calls):
+                        nonlocal _tracking_ws
                         try:
-                            t_sheet = await gc.open_by_key(CONFIG["TRACKING_SHEET_ID"])
-                            t_ws = await t_sheet.worksheet(pipeline_name)
-                            vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                            try:
+                                t_ws = await _get_tracking_ws()
+                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
+                            except Exception:
+                                _tracking_ws = None
+                                t_ws = await _get_tracking_ws()
+                                vals = await t_ws.batch_get(["B2", "B3", "B4", "B5", "B6"])
                             curr_in = int(vals[0][0][0]) if vals and vals[0] and vals[0][0] else 0
                             curr_out = int(vals[1][0][0]) if len(vals) > 1 and vals[1] and vals[1][0] else 0
                             curr_think = int(vals[2][0][0]) if len(vals) > 2 and vals[2] and vals[2][0] else 0
