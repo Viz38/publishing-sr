@@ -962,17 +962,21 @@ class TypeAPipeline:
                 dp_id = row[h_map["dp_id"]]
                 funnel_id = row[h_map["funnel_id"]]
                 
+                ht_val_init = res.get("hashtags")
+                if ht_val_init is None:
+                    initial_hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
+                elif isinstance(ht_val_init, str):
+                    initial_hashtags = [t.strip() for t in ht_val_init.split(",") if t.strip()]
+                else:
+                    initial_hashtags = list(ht_val_init)
+                
+                has_incorrect_pred_tag = any(h.lower() == "bu_llm_sr_incorrectprediction" for h in initial_hashtags)
+
                 async def update_dp():
                     sd = res.get("sd") if is_success else None
                     ld = res.get("ld1") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
-                        ht_val = res.get("hashtags")
-                        if ht_val is None:
-                            hashtags = [t.strip() for t in row[h_map["tags"]].split(",")] if len(row) > h_map["tags"] and row[h_map["tags"]] else []
-                        elif isinstance(ht_val, str):
-                            hashtags = [t.strip() for t in ht_val.split(",") if t.strip()]
-                        else:
-                            hashtags = list(ht_val)
+                        hashtags = list(initial_hashtags)
                         
                         special_flags_raw = res.get("sf")
                         if not special_flags_raw:
@@ -984,8 +988,13 @@ class TypeAPipeline:
                         
                         if "bu_llm_sd_ld" not in hashtags:
                             hashtags.append("bu_llm_sd_ld")
-                        if is_full_success and "bu_Internal_SRprocess_TypeA" not in hashtags:
-                            hashtags.append("bu_Internal_SRprocess_TypeA")
+                        if is_full_success:
+                            if "bu_Internal_SRprocess_TypeA" not in hashtags:
+                                hashtags.append("bu_Internal_SRprocess_TypeA")
+                            hashtags = [h for h in hashtags if h.lower() != "bu_llm_sr_incorrectprediction"]
+                        else:
+                            if "bu_llm_sr_incorrectprediction" not in hashtags:
+                                hashtags.append("bu_llm_sr_incorrectprediction")
                             
                         payload = {
                             "id": dp_id, 
@@ -997,23 +1006,27 @@ class TypeAPipeline:
                         if sf_array:
                             payload["specialFlags"] = {"value": sf_array}
                         
-                        try:
-                            eh_status, eh_res = await call_tracxn_api(
-                                session, 
-                                f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
-                                tracxn_limiter, method="get", headers=HEADERS
-                            )
-                            if eh_status == 200 and isinstance(eh_res, list):
-                                for item_eh in eh_res:
-                                    a_name = item_eh.get("attributeName")
-                                    if a_name in ("foundedYear", "companyLocation") and item_eh.get("createdBy") == "publish.edits@tracxn.com":
-                                        payload[a_name] = {"value": None}
-                                        pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
-                        except Exception as eh_err:
-                            pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                        
                             
                         return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
-                    return 200, None
+                    else:
+                        hashtags = list(initial_hashtags)
+                        fail_reason = res.get('reason', 'Failed') if not is_success else ''
+
+                        if fail_reason.startswith("Missing"):
+                            if "bu_llm_sr_incorrectprediction" not in hashtags:
+                                hashtags.append("bu_llm_sr_incorrectprediction")
+                        else:
+                            if "bu_llm_sr_lowwebscrap" not in hashtags:
+                                hashtags.append("bu_llm_sr_lowwebscrap")
+
+                        res["hashtags"] = ", ".join(hashtags)
+
+                        payload = {
+                            "id": dp_id, 
+                            "keywords": {"value": {"HASHTAGS": hashtags}}
+                        }
+                        return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, json_data=payload, headers=HEADERS)
                     
                 async def update_bm():
                     if is_full_success:
@@ -1022,7 +1035,45 @@ class TypeAPipeline:
                     return 200, None
                     
                 async def update_funnel(feed_status):
-                    f_id_to_move = "5dc5863a2799a51cc0ff30e2" if is_full_success else "64197f01a6dcff6572453ead"
+                    if is_full_success:
+                        f_id_to_move = "5dc5863a2799a51cc0ff30e2"
+                    else:
+                        if not is_success:
+                            fail_reason = res.get('reason', 'Failed')
+                        else:
+                            fail_reason = "Missing BM match"
+                            
+                        sd_check = res.get("sd") if is_success else None
+                        is_low_webscrap = (
+                            not is_success or sd_check in (None, "", "NO_DATA", "PARKED_LLM")
+                        ) and not fail_reason.startswith("Missing")
+                        
+                        if is_low_webscrap:
+                            # Low webscraping/parked issues snooze
+                            As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                            if As in (200, 201):
+                                Snooz_noweb, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/snooze", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "snoozeMethod": {"type": "period", "value": "180"}, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                                if Snooz_noweb in (200,201):
+                                    return "Snoozed"
+                                else:
+                                    return "Snooze Failed"
+                            else:
+                                return "Assign Failed"
+                        else:
+                            # Irrelevant / prediction failure cases: only move if hashtag was already present
+                            if has_incorrect_pred_tag:
+                                As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                                if As in (200, 201):
+                                    Snooz_noweb, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/snooze", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "snoozeMethod": {"type": "period", "value": "180"}, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                                    if Snooz_noweb in (200,201):
+                                        return "Snoozed"
+                                    else:
+                                        return "Snooze Failed"
+                                else:
+                                    return "Assign Failed"
+                            else:
+                                f_id_to_move = "64197f01a6dcff6572453ead"
+
                     As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
                     if As in (200, 201):
                         ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
@@ -1035,7 +1086,14 @@ class TypeAPipeline:
                 (s1, _), (s2, _) = await asyncio.gather(update_dp(), update_bm())
                 ms = await update_funnel(s2)
                 
-                fail_reason = res.get('reason', 'Failed') if not is_success else ''
+                if not is_success:
+                    fail_reason = res.get('reason', 'Failed')
+                elif not is_full_success:
+                    fail_reason = "Missing BM match"
+                else:
+                    fail_reason = ""
+                    
+                pipeline_logger.info(f"TEST LOG [{domain}]: is_success={is_success} | is_full_success={is_full_success} | fail_reason='{fail_reason}' | has_incorrect_pred_tag={has_incorrect_pred_tag} | funnel_status={ms}")
                 
                 if fail_reason in ("Low Content", "Low content"):
                     not_updated_text = "Low Content"
@@ -1062,6 +1120,10 @@ class TypeAPipeline:
                     
                 if ms in (200, 201):
                     fun = "Sent Back to Discovery" if not is_full_success else "Done"
+                elif ms == "Snoozed":
+                    fun = "Snoozed"
+                elif ms == "Snooze Failed":
+                    fun = "Snooze Failed"
                 else:
                     fun = "Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err")
                 
