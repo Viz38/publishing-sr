@@ -29,7 +29,7 @@ from sr_common.utils import (
     get_dynamic_max_workers, SystemHealthMonitor, 
     GeminiCacheManager, clean_html, is_parked_domain,
     update_manual_curation_date, is_tc_scraper_mode, col_to_index,
-    reconcile_sheet_gaps, TrackingCacheManager, get_optimized_tcp_connector
+    reconcile_sheet_gaps, TrackingCacheManager, get_optimized_tcp_connector, trim_memory
 )
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
@@ -626,6 +626,7 @@ class TypeBPipeline:
                     await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 w_q.task_done()
+                trim_memory()
 
     async def tracxn_worker(self, t_q, r_q, session):
         """Asynchronous worker dedicated to Tracxn API updates.
@@ -828,6 +829,7 @@ class TypeBPipeline:
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 t_q.task_done()
+                trim_memory()
 
     async def sheet_writer(self, r_q, ws, total, gc, pipeline_name, t_q=None):
         processed_indices, success, fail = set(), 0, 0
@@ -958,6 +960,7 @@ class TypeBPipeline:
                 for _ in updates: r_q.task_done()
                 updates = []
                 last_flush = time.time()
+                trim_memory()
                 current_completed = success + fail
                 self.report_progress(current_completed, total, success, fail, backlog=(t_q.qsize() if t_q else 0))
                 pipeline_logger.info(f"PROGRESS: {current_completed}/{total} | Success: {success} | Fail: {fail}")

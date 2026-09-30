@@ -87,6 +87,11 @@ class BrowserManager:
                                     await old_camoufox.__aexit__(None, None, None)
                                 except Exception as e:
                                     logger.warning(f"BROWSER_MGR: Error exiting camoufox context: {e}")
+                            try:
+                                from .utils import trim_memory
+                                trim_memory()
+                            except Exception:
+                                pass
                         else:
                             self._pending_close.append((old_browser, old_camoufox))
                             async def _delayed_close(b, c):
