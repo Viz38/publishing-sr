@@ -198,36 +198,75 @@ check_for_updates() {
         echo -e "${YELLOW}Updates are only supported if the repository was cloned using 'git clone'.${NC}"
         return
     fi
-    echo -e "${BLUE}🔍 Checking for updates...${NC}"
-    git fetch origin main &>/dev/null
+    echo -e "${BLUE}🔍 Checking for updates across all branches...${NC}"
+    git fetch --all --prune &>/dev/null
     
-    local LOCAL=$(git rev-parse @ 2>/dev/null)
-    local REMOTE=$(git rev-parse @{u} 2>/dev/null)
-    
-    if [ -z "$LOCAL" ] || [ -z "$REMOTE" ]; then
-        echo -e "${RED}Error: Could not check version. Check your internet connection.${NC}"
-        return
-    fi
-    
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo -e "${YELLOW}✨ New updates available!${NC}"
-        echo -e "${RED}⚠️  Warning: Updating will stop all running processes.${NC}"
+    local CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "main")
+    local HAS_UPDATES=0
+    local BRANCHES_WITH_UPDATES=()
+
+    for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
+        local up=$(git rev-parse --abbrev-ref "${b}@{u}" 2>/dev/null || echo "origin/$b")
+        if git rev-parse --verify "$up" &>/dev/null; then
+            # Count incoming commits from remote ($up) not yet present in local ($b)
+            local INCOMING=$(git rev-list --count "$b..$up" 2>/dev/null || echo "0")
+            if [ "$INCOMING" -gt 0 ]; then
+                HAS_UPDATES=1
+                BRANCHES_WITH_UPDATES+=("$b ($INCOMING incoming commit(s) from $up)")
+            fi
+        fi
+    done
+
+    if [ $HAS_UPDATES -eq 1 ]; then
+        echo -e "${YELLOW}✨ New updates available for branches:${NC}"
+        for b_info in "${BRANCHES_WITH_UPDATES[@]}"; do
+            echo -e "   • ${YELLOW}$b_info${NC}"
+        done
+        echo -e "${RED}⚠️  Warning: Updating will stop running processes and discard local code changes on updated branches.${NC}"
+        echo -e "${BLUE}ℹ️  Branches with no incoming changes, .env, virtual environments, and credentials will remain preserved.${NC}"
         read -p "Do you want to update now? (y/n): " confirm
         if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
             stop_all
             echo -e "${BLUE}🗑️  Removing uv.lock...${NC}"
             rm -f uv.lock
-            echo -e "${BLUE}📥 Pulling new code...${NC}"
-            if ! git pull --force origin main; then
-                echo -e "${RED}❌ Update failed! Please check the Git errors above.${NC}"
-                return
+
+            local CURRENT_UP=$(git rev-parse --abbrev-ref "${CURRENT_BRANCH}@{u}" 2>/dev/null || echo "origin/$CURRENT_BRANCH")
+            local ACTIVE_INCOMING=0
+            if git rev-parse --verify "$CURRENT_UP" &>/dev/null; then
+                ACTIVE_INCOMING=$(git rev-list --count "$CURRENT_BRANCH..$CURRENT_UP" 2>/dev/null || echo "0")
             fi
-            echo -e "${GREEN}✅ Update completed successfully.${NC}"
+
+            # Discard local uncommitted tracked changes on active branch ONLY if active branch has incoming changes
+            if [ "$ACTIVE_INCOMING" -gt 0 ]; then
+                echo -e "${BLUE}🔄 Discarding local tracked code changes on active branch ($CURRENT_BRANCH)...${NC}"
+                git reset --hard HEAD &>/dev/null
+            fi
+
+            echo -e "${BLUE}📥 Updating branches with incoming changes...${NC}"
+            for b in $(git for-each-ref --format='%(refname:short)' refs/heads/); do
+                local up=$(git rev-parse --abbrev-ref "${b}@{u}" 2>/dev/null || echo "origin/$b")
+                if git rev-parse --verify "$up" &>/dev/null; then
+                    local INCOMING=$(git rev-list --count "$b..$up" 2>/dev/null || echo "0")
+                    if [ "$INCOMING" -gt 0 ]; then
+                        if [ "$b" = "$CURRENT_BRANCH" ]; then
+                            echo -e "   ▶ Updating active branch ($INCOMING new commits): ${GREEN}$b${NC} -> ${GREEN}$up${NC}"
+                            git reset --hard "$up" &>/dev/null || git pull --force origin "$b" &>/dev/null
+                        else
+                            echo -e "   ▶ Updating background branch ($INCOMING new commits): ${GREEN}$b${NC} -> ${GREEN}$up${NC}"
+                            git branch -f "$b" "$up" &>/dev/null
+                        fi
+                    else
+                        echo -e "   ⏭️  Preserving local branch ${BLUE}$b${NC} (no incoming changes from $up)"
+                    fi
+                fi
+            done
+
+            echo -e "${GREEN}✅ All updates applied successfully.${NC}"
             read -p "Hit ENTER to exit and restart the script manually..."
             exit 0
         fi
     else
-        echo -e "${GREEN}✅ You are on the latest version.${NC}"
+        echo -e "${GREEN}✅ You are on the latest version across all branches.${NC}"
     fi
 }
 
