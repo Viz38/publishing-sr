@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     TYPEA_SHEET_ID: str = ""
     TYPEB_SHEET_ID: str = ""
     TYPEC_SHEET_ID: str = ""
+    TECHCRWLER_SHEET_ID: str = ""
+    TECHCRWLER_ACCESS_KEYS: str = ""
+    TECHCRWLER_CREDENTIALS_B64: str = ""
     
     MASTER_SHEET_ID: str = ""
     PROMPTS_SHEET_ID: str = ""
@@ -58,11 +61,11 @@ class Settings(BaseSettings):
     # Service Auth
     SERVICE_AUTH_TOKEN: str = ""
 
-    # Supabase (Tech Crawler data source for TypeB)
-    SUPABASE_HOST: str = "aws-0-ap-northeast-1.pooler.supabase.com"
-    SUPABASE_PORT: int = 6543
-    SUPABASE_DB: str = "postgres"
-    SUPABASE_USER: str = "postgres.fqccsacfdtnlnvlhcuec"
+    # Supabase (Tech Crawler data source)
+    SUPABASE_HOST: str = ""
+    SUPABASE_PORT: int = 5432
+    SUPABASE_DB: str = ""
+    SUPABASE_USER: str = ""
     SUPABASE_PASSWORD: str = ""
 
     def __init__(self, **kwargs):

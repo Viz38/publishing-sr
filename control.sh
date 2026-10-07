@@ -90,9 +90,9 @@ if [[ "$OS" == "Linux" ]]; then
     fi
 fi
 
-FOLDERS=("TypeA" "TypeB" "TypeC")
-PORTS=(8767 8765 8766)
-NAMES=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached")
+FOLDERS=("TypeA" "TypeB" "TypeC" "techcrwler")
+PORTS=(8767 8765 8766 8768)
+NAMES=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached" "sr-techcrwler")
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -237,15 +237,16 @@ clear_logs() {
     echo "2) Clear Type A Logs"
     echo "3) Clear Type B Logs"
     echo "4) Clear Type C Logs"
-    echo "5) Clear control.logs Only"
-    echo "6) Back"
-    read -p "Option [1-6]: " log_opt
+    echo "5) Clear TechCrawler Logs"
+    echo "6) Clear control.logs Only"
+    echo "7) Back"
+    read -p "Option [1-7]: " log_opt
     case $log_opt in
         1) 
-            for f in Type*/Logs/*.log Type*/Logs/*.logs; do
+            for f in Type*/Logs/*.log Type*/Logs/*.logs techcrwler/Logs/*.log techcrwler/Logs/*.logs; do
                 [ -f "$f" ] && > "$f"
             done
-            rm -f Type*/Logs/Snapshots/* 2>/dev/null
+            rm -f Type*/Logs/Snapshots/* techcrwler/Logs/Snapshots/* 2>/dev/null
             > "$LOG_FILE"
             echo -e "${GREEN}✅ All logs cleared.${NC}";;
         2) 
@@ -266,7 +267,13 @@ clear_logs() {
             done
             rm -f TypeC/Logs/Snapshots/* 2>/dev/null
             echo -e "${GREEN}✅ Type C logs cleared.${NC}";;
-        5) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
+        5) 
+            for f in techcrwler/Logs/*.log techcrwler/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f techcrwler/Logs/Snapshots/* 2>/dev/null
+            echo -e "${GREEN}✅ TechCrawler logs cleared.${NC}";;
+        6) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
         *) return;;
     esac
 }
@@ -485,14 +492,16 @@ configure_credentials_menu() {
                 echo "1) Type A"
                 echo "2) Type B"
                 echo "3) Type C"
-                echo "4) Back"
-                read -p "Type [1-4]: " type_opt
+                echo "4) TechCrawler"
+                echo "5) Back"
+                read -p "Type [1-5]: " type_opt
                 
                 local selected_type=""
                 case $type_opt in
                     1) selected_type="TypeA" ;;
                     2) selected_type="TypeB" ;;
                     3) selected_type="TypeC" ;;
+                    4) selected_type="techcrwler" ;;
                     *) continue ;;
                 esac
                 
