@@ -1,3 +1,37 @@
+## [2026-10-07] Incoming-Only Update Gating: Preserve Branches Without Remote Changes
+Files changed:
+- control.sh
+- Temp_Test/test_control_runner.py
+Reason:
+1. Incoming Commits Counting via `git rev-list`:
+   - Updated `check_for_updates` in `control.sh` to measure `git rev-list --count "$b..$up"`.
+   - Local branches with unpushed work or local edits are strictly protected if there are no new commits incoming from the remote (`INCOMING == 0`).
+2. Conditional Discard and Synchronization:
+   - Only branches with actual incoming commits (`INCOMING > 0`) are updated or reset to remote.
+   - For the active branch, local uncommitted tracked changes are discarded only when incoming updates exist.
+   - Background branches with local work and zero incoming updates are completely skipped and preserved.
+Related tests:
+- Temp_Test/test_control_runner.py
+
+## [2026-10-07] Multi-Branch Safe Updates & Automatic Local Tracked Change Discard in control.sh
+Files changed:
+- control.sh
+- Temp_Test/test_control_runner.py
+Reason:
+1. Automatic Tracked Change Discard:
+   - When updating via Option 6 in `control.sh`, local uncommitted modifications to tracked files are automatically discarded with `git reset --hard HEAD` and `git reset --hard "$up"`.
+   - Incoming updates from the remote repository are always accepted without failing due to local merge conflicts.
+2. Protection of Secrets, Dependencies, and Untracked Files:
+   - Completely avoids destructive commands like `git stash --all` (which swept away `.env` and `.venv`) and `git clean -xdf`.
+   - `.env`, `.venv/`, credentials (`*.json`), and any untracked project files remain 100% preserved and untouched.
+3. Multi-Branch Synchronization:
+   - Uses `git fetch --all --prune` to fetch the entire repository state.
+   - Detects all local branches present in the repository (`refs/heads/*`).
+   - Synchronizes the active branch via hard reset to upstream.
+   - Updates all background local branches directly with `git branch -f "$b" "$up"`.
+Related tests:
+- Temp_Test/test_control_runner.py
+
 ## [2026-10-07] Streamline TechCrawler Apps Script: Remove Mode and Formatting Options
 Files changed:
 - techcrwler/apps_script.gs
