@@ -90,9 +90,9 @@ if [[ "$OS" == "Linux" ]]; then
     fi
 fi
 
-FOLDERS=("TypeA" "TypeB" "TypeC")
-PORTS=(8767 8765 8766)
-NAMES=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached")
+FOLDERS=("TypeA" "TypeB" "TypeC" "techcrwler")
+PORTS=(8767 8765 8766 8768)
+NAMES=("sr-typea-cached" "sr-typeb-cached" "sr-typec-cached" "sr-techcrwler")
 
 GREEN='\033[0;32m'
 BLUE='\033[0;34m'
@@ -237,15 +237,16 @@ clear_logs() {
     echo "2) Clear Type A Logs"
     echo "3) Clear Type B Logs"
     echo "4) Clear Type C Logs"
-    echo "5) Clear control.logs Only"
-    echo "6) Back"
-    read -p "Option [1-6]: " log_opt
+    echo "5) Clear TechCrawler Logs"
+    echo "6) Clear control.logs Only"
+    echo "7) Back"
+    read -p "Option [1-7]: " log_opt
     case $log_opt in
         1) 
-            for f in Type*/Logs/*.log Type*/Logs/*.logs; do
+            for f in Type*/Logs/*.log Type*/Logs/*.logs techcrwler/Logs/*.log techcrwler/Logs/*.logs; do
                 [ -f "$f" ] && > "$f"
             done
-            rm -f Type*/Logs/Snapshots/* 2>/dev/null
+            rm -f Type*/Logs/Snapshots/* techcrwler/Logs/Snapshots/* 2>/dev/null
             > "$LOG_FILE"
             echo -e "${GREEN}✅ All logs cleared.${NC}";;
         2) 
@@ -266,7 +267,13 @@ clear_logs() {
             done
             rm -f TypeC/Logs/Snapshots/* 2>/dev/null
             echo -e "${GREEN}✅ Type C logs cleared.${NC}";;
-        5) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
+        5) 
+            for f in techcrwler/Logs/*.log techcrwler/Logs/*.logs; do
+                [ -f "$f" ] && > "$f"
+            done
+            rm -f techcrwler/Logs/Snapshots/* 2>/dev/null
+            echo -e "${GREEN}✅ TechCrawler logs cleared.${NC}";;
+        6) > "$LOG_FILE"; echo -e "${GREEN}✅ control.logs cleared.${NC}";;
         *) return;;
     esac
 }
@@ -317,7 +324,7 @@ verify_port() {
     local f_path=$3
     echo -ne "   ⏳ Waiting for $name (Port $port)..."
     sleep 2 # Give process a moment to bind
-    for i in {1..15}; do
+    for i in {1..30}; do
         if check_port $port; then
             echo -e " ${GREEN}ONLINE${NC}"
             log "INFO" "Service $name started on port $port"
@@ -485,14 +492,16 @@ configure_credentials_menu() {
                 echo "1) Type A"
                 echo "2) Type B"
                 echo "3) Type C"
-                echo "4) Back"
-                read -p "Type [1-4]: " type_opt
+                echo "4) TechCrawler"
+                echo "5) Back"
+                read -p "Type [1-5]: " type_opt
                 
                 local selected_type=""
                 case $type_opt in
                     1) selected_type="TypeA" ;;
                     2) selected_type="TypeB" ;;
                     3) selected_type="TypeC" ;;
+                    4) selected_type="techcrwler" ;;
                     *) continue ;;
                 esac
                 
@@ -535,9 +544,17 @@ create_runner() {
     # Create empty log file if not exists
     touch "$f_path/Logs/api.logs"
     
-    # Resolve the absolute path to uv dynamically to ensure it never fails in systemd/launchd
+    # Resolve the uvicorn executable path (prefer direct .venv binary for instant startup)
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     local uv_bin_path=$(command -v uv)
+    local uvicorn_cmd
+    if [ -f "$BASE_DIR/.venv/bin/uvicorn" ]; then
+        uvicorn_cmd="\"$BASE_DIR/.venv/bin/uvicorn\""
+    elif [ -n "$uv_bin_path" ]; then
+        uvicorn_cmd="\"$uv_bin_path\" run uvicorn"
+    else
+        uvicorn_cmd="uvicorn"
+    fi
     
     cat <<EOF > "$runner"
 #!/bin/bash
@@ -545,7 +562,7 @@ cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-"$uv_bin_path" run uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
+$uvicorn_cmd api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
@@ -777,7 +794,7 @@ while true; do
             fi
             read -p "Enter..." ;;
         4) stop_all; read -p "Enter..." ;;
-        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs 2>/dev/null; trap - INT ;;
+        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs Type*/Logs/*.log techcrwler/Logs/*.logs techcrwler/Logs/*.log 2>/dev/null; trap - INT ;;
         6) check_for_updates; read -p "Enter..." ;;
         7) clear_logs; read -p "Enter..." ;;
         8) configure_credentials_menu ;;
@@ -802,7 +819,7 @@ while true; do
                     fi
                 fi
                 echo -e "${BLUE}🧹 Removing logs...${NC}"
-                rm -rf Type*/Logs
+                rm -rf Type*/Logs techcrwler/Logs
                 echo -e "${GREEN}✅ Deep clean complete. Use Option 1 to reinstall.${NC}"
             fi
             read -p "Enter..." ;;

@@ -1095,7 +1095,7 @@ class TypeAPipeline:
                 else:
                     fail_reason = ""
                     
-                pipeline_logger.info(f"TEST LOG [{domain}]: is_success={is_success} | is_full_success={is_full_success} | fail_reason='{fail_reason}' | has_incorrect_pred_tag={has_incorrect_pred_tag} | funnel_status={ms}")
+                # pipeline_logger.info(f"TEST LOG [{domain}]: is_success={is_success} | is_full_success={is_full_success} | fail_reason='{fail_reason}' | has_incorrect_pred_tag={has_incorrect_pred_tag} | funnel_status={ms}")
                 
                 if fail_reason in ("Low Content", "Low content"):
                     not_updated_text = "Low Content"

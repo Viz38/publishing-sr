@@ -1,0 +1,6 @@
+Logs/
+.progress.json
+.stop_requested
+techcrwler.json
+__pycache__/
+*.pyc

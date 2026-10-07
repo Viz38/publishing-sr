@@ -1,6 +1,6 @@
 #!/bin/bash
-cd "/home/tracxn-lp-477/Desktop/publishing-sr/TypeB"
+cd "/Users/vishnu/Documents/Tracxn/SR/publishing-sr/TypeB"
 # Ensure project root is in PYTHONPATH for sr_common imports
-export PYTHONPATH="/home/tracxn-lp-477/Desktop/publishing-sr:$PYTHONPATH"
+export PYTHONPATH="/Users/vishnu/Documents/Tracxn/SR/publishing-sr:$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-"/home/tracxn-lp-477/.local/bin/uv" run uvicorn api:app --host 0.0.0.0 --port 8765 --workers 1 --log-level info >> "/home/tracxn-lp-477/Desktop/publishing-sr/TypeB/Logs/api.logs" 2>&1
+"/Users/vishnu/Documents/Tracxn/SR/publishing-sr/.venv/bin/uvicorn" api:app --host 0.0.0.0 --port 8765 --workers 1 --log-level info >> "/Users/vishnu/Documents/Tracxn/SR/publishing-sr/TypeB/Logs/api.logs" 2>&1
