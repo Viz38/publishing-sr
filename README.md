@@ -19,14 +19,17 @@ graph TD
     UI[Google Apps Script] --> |REST API| API_A[Type A FastAPI :8767]
     UI --> |REST API| API_B[Type B FastAPI :8765]
     UI --> |REST API| API_C[Type C FastAPI :8766]
+    UI --> |REST API| API_T[TechCrawler FastAPI :8768]
     
     API_A --> WorkerA[Pipeline A]
     API_B --> WorkerB[Pipeline B]
     API_C --> WorkerC[Pipeline C]
+    API_T --> WorkerT[TechCrawler Pipeline]
     
     WorkerA --> Core[sr_common Core]
     WorkerB --> Core
     WorkerC --> Core
+    WorkerT --> Core
     
     Core --> Sheets[Google Sheets API]
     Core --> Gemini[Gemini LLM API]
@@ -40,6 +43,7 @@ graph TD
 | **Type A (High-Fidelity)** | Deep multi-page scraping, dual-level BM prediction, and Special Flag extraction. | `8767` |
 | **Type B (Scale)** | High-concurrency throughput with dynamic resource scaling and proxy fallback. | `8765` |
 | **Type C (Operations)** | Dynamic sheet processing, fuzzy header detection, and automated data cleanup. | `8766` |
+| **TechCrawler** | Supabase data source ingestion, targeted content extraction, and enrichment. | `8768` |
 | **sr_common** | Centralized stealth Fetcher, config via Pydantic V2 `BaseSettings`, and Tracxn/Gemini clients. | N/A |
 
 ## Setup & Installation

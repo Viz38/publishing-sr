@@ -324,7 +324,7 @@ verify_port() {
     local f_path=$3
     echo -ne "   ⏳ Waiting for $name (Port $port)..."
     sleep 2 # Give process a moment to bind
-    for i in {1..15}; do
+    for i in {1..30}; do
         if check_port $port; then
             echo -e " ${GREEN}ONLINE${NC}"
             log "INFO" "Service $name started on port $port"
@@ -544,9 +544,17 @@ create_runner() {
     # Create empty log file if not exists
     touch "$f_path/Logs/api.logs"
     
-    # Resolve the absolute path to uv dynamically to ensure it never fails in systemd/launchd
+    # Resolve the uvicorn executable path (prefer direct .venv binary for instant startup)
     export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
     local uv_bin_path=$(command -v uv)
+    local uvicorn_cmd
+    if [ -f "$BASE_DIR/.venv/bin/uvicorn" ]; then
+        uvicorn_cmd="\"$BASE_DIR/.venv/bin/uvicorn\""
+    elif [ -n "$uv_bin_path" ]; then
+        uvicorn_cmd="\"$uv_bin_path\" run uvicorn"
+    else
+        uvicorn_cmd="uvicorn"
+    fi
     
     cat <<EOF > "$runner"
 #!/bin/bash
@@ -554,7 +562,7 @@ cd "$f_path"
 # Ensure project root is in PYTHONPATH for sr_common imports
 export PYTHONPATH="$BASE_DIR:\$PYTHONPATH"
 export PYTHONUNBUFFERED=1
-"$uv_bin_path" run uvicorn api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
+$uvicorn_cmd api:app --host 0.0.0.0 --port $f_port --workers 1 --log-level info >> "$f_path/Logs/api.logs" 2>&1
 EOF
     chmod +x "$runner"
     xattr -d com.apple.quarantine "$runner" 2>/dev/null
@@ -786,7 +794,7 @@ while true; do
             fi
             read -p "Enter..." ;;
         4) stop_all; read -p "Enter..." ;;
-        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs 2>/dev/null; trap - INT ;;
+        5) trap 'echo "Returning...";' INT; tail -f Type*/Logs/*.logs Type*/Logs/*.log techcrwler/Logs/*.logs techcrwler/Logs/*.log 2>/dev/null; trap - INT ;;
         6) check_for_updates; read -p "Enter..." ;;
         7) clear_logs; read -p "Enter..." ;;
         8) configure_credentials_menu ;;
@@ -811,7 +819,7 @@ while true; do
                     fi
                 fi
                 echo -e "${BLUE}🧹 Removing logs...${NC}"
-                rm -rf Type*/Logs
+                rm -rf Type*/Logs techcrwler/Logs
                 echo -e "${GREEN}✅ Deep clean complete. Use Option 1 to reinstall.${NC}"
             fi
             read -p "Enter..." ;;

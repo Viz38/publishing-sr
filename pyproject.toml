@@ -34,7 +34,8 @@ dependencies = [
     "uvloop",
     "msgspec",
     "httpx",
-    "google-generativeai"
+    "google-generativeai",
+    "backoff"
 ]
 
 [tool.uv]

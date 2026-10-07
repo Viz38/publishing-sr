@@ -1,3 +1,56 @@
+## [2026-10-07] Streamline TechCrawler Apps Script: Remove Mode and Formatting Options
+Files changed:
+- techcrwler/apps_script.gs
+- Temp_Test/test_apps_script_config.py
+Reason:
+1. Simplify Setup View in Apps Script:
+   - Removed the Pipeline Mode selector dropdown, Formatting checkbox, and phase explanation card from Step 2 of the wizard UI.
+   - TechCrawler operates solely in full extraction/crawling mode and does not use spreadsheet formatting options.
+   - Streamlined Step 2 to exclusively display Worker confirmation, Start Row number input, and Start/Back controls.
+2. Direct Payload Routing:
+   - Simplified `executeRunFromUi(startRow, workerUrl)` to automatically supply `mode: 'full'` directly to `/techcrwler/start`.
+Related tests:
+- Temp_Test/test_apps_script_config.py
+
+## [2026-10-07] Include TechCrawler Logs in Option 5 Live Logs and Option 10 Deep Clean
+Files changed:
+- control.sh
+- Temp_Test/test_control_runner.py
+Reason:
+1. Live Logs Streaming (Option 5):
+   - Updated Option 5 in `control.sh` (`tail -f`) to tail `techcrwler/Logs/*.logs` and `techcrwler/Logs/*.log` along with `Type*/Logs/*.logs` and `Type*/Logs/*.log`.
+   - Allows operators to monitor TechCrawler API activity (`api.logs`), standard error (`stderr.log`), and stdout streams alongside Types A, B, and C in real-time.
+2. Deep Clean (Option 10):
+   - Updated Option 10 in `control.sh` to remove `techcrwler/Logs` in addition to `Type*/Logs`.
+Related tests:
+- Temp_Test/test_control_runner.py
+
+## [2026-10-07] Fix TechCrawler Missing Dependency & Optimize control.sh Engine Launch
+Files changed:
+- pyproject.toml
+- control.sh
+- techcrwler/apps_script.gs
+- README.md
+- CHANGELOG.md
+- Temp_Test/test_control_runner.py
+- Temp_Test/test_apps_script_config.py
+- Temp_Test/test_techcrwler_cloudflare_endpoints.py
+Reason:
+1. Fix Missing `backoff` Dependency:
+   - Identified that `techcrwler/main.py` failed with `ModuleNotFoundError: No module named 'backoff'` (logged in `techcrwler/Logs/stderr.log`).
+   - Root cause: `backoff` was imported across retry decorators in `techcrwler/main.py` but was omitted from `pyproject.toml`.
+   - Resolution: Added `"backoff"` to `pyproject.toml` and installed `backoff==2.2.1` in the virtual environment.
+2. Fast Engine Startup & Extended Port Verification in `control.sh`:
+   - Updated `create_runner()` in `control.sh` to prefer `"$BASE_DIR/.venv/bin/uvicorn"` directly rather than wrapping through `uv run`, avoiding redundant environment re-resolution and launching engines in <1s.
+   - Extended `verify_port()` timeout from 15s to 30s to eliminate false-positive `FAILED` reports on slower machine cold starts.
+3. TechCrawler Google Apps Script & Cloudflare Integration:
+   - Added `techcrwler/apps_script.gs` containing the fleet orchestration interface configured for the 5 Cloudflare tunnel URLs (`4230-techcrwler`, `4990-techcrwler`, `rajath-techcrwler`, `vishnu-techcrwler`, `keshava-techcrwler`).
+   - Wired custom Google Sheets menu (`🚀 Tracxn Menu`), real-time fleet health prober, 3-step wizard UI, status polling, and graceful cancellation targeting `/techcrwler/*` endpoints.
+Related tests:
+- Temp_Test/test_control_runner.py
+- Temp_Test/test_apps_script_config.py
+- Temp_Test/test_techcrwler_cloudflare_endpoints.py
+
 ## [2026-09-29] Performance Hardening: Pre-computed Lookups, Deterministic Mapping, TCP Pooling, Cache Debouncing & Log Rotation
 Files changed:
 - sr_common/config.py
