@@ -572,26 +572,26 @@ class TypeCPipeline:
                                 tags.append("bu_llm_sr_incorrectprediction")
                                 
                         res["hashtags"] = tags
-                        payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}, "status": {"value": "PUBLISHED"}}
+                        payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
                         
                         company_name = res.get("company_name", "").strip()
-                        if company_name:
-                            payload["companyName"] = {"value": company_name}
+                        # if company_name:
+                        #     payload["companyName"] = {"value": company_name}
                             
-                        try:
-                            eh_status, eh_res = await call_tracxn_api(
-                                session, 
-                                f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
-                                tracxn_limiter, method="get", headers=HEADERS
-                            )
-                            if eh_status == 200 and isinstance(eh_res, list):
-                                for item_eh in eh_res:
-                                    a_name = item_eh.get("attributeName")
-                                    if a_name in ("foundedYear", "companyLocation") and item_eh.get("createdBy") == "publish.edits@tracxn.com":
-                                        payload[a_name] = {"value": None}
-                                        pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
-                        except Exception as eh_err:
-                            pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
+                        # try:
+                        #     eh_status, eh_res = await call_tracxn_api(
+                        #         session, 
+                        #         f"https://platform.tracxn.com/data/edithistory/edits/DOMAIN_PROFILE/{dp_id}", 
+                        #         tracxn_limiter, method="get", headers=HEADERS
+                        #     )
+                        #     if eh_status == 200 and isinstance(eh_res, list):
+                        #         for item_eh in eh_res:
+                        #             a_name = item_eh.get("attributeName")
+                        #             if a_name in ("foundedYear", "companyLocation") and item_eh.get("createdBy") == "publish.edits@tracxn.com":
+                        #                 payload[a_name] = {"value": None}
+                        #                 pipeline_logger.info(f"BOT CLEANUP: Clearing {a_name} for {domain}")
+                        # except Exception as eh_err:
+                        #     pipeline_logger.error(f"Failed to fetch edit history for {domain}: {eh_err}")
                             
                         return await call_tracxn_api(session, "https://platform.tracxn.com/data/entities/2.0/domain-profile", tracxn_limiter, method="put", json_data=payload, headers=HEADERS)
                     else:
@@ -622,55 +622,24 @@ class TypeCPipeline:
                 async def update_funnel(feed_status):
                     feed_id = res.get("feed_id") or (row[h_map["feed_id"]] if len(row) > h_map["feed_id"] else "")
                     is_full_success_typec = bool(feed_id and is_success)
-                    if is_full_success_typec:
-                        f_id_to_move = "5dc586332799a51cc0ff2e36"
-                    else:
-                        if not is_success:
-                            fail_reason = res.get('reason', 'Failed')
-                        else:
-                            fail_reason = "Missing BM match"
-                            
-                        sd_check = res.get("sd") if is_success else None
-                        is_low_webscrap = (
-                            not is_success or sd_check in (None, "", "NO_DATA", "PARKED_LLM")
-                        ) and not fail_reason.startswith("Missing")
-                        
-                        if is_low_webscrap:
-                            # Low webscraping/parked issues snooze
-                            As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                            if As in (200, 201):
-                                Snooz_noweb, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/snooze", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "snoozeMethod": {"type": "period", "value": "180"}, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                                if Snooz_noweb in (200,201):
-                                    return "Snoozed"
-                                else:
-                                    return "Snooze Failed"
-                            else:
-                                return "Assign Failed"
-                        else:
-                            # Irrelevant / prediction failure cases: only move if hashtag was already present
-                            if has_incorrect_pred_tag:
-                                As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                                if As in (200, 201):
-                                    Snooz_noweb, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/snooze", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "snoozeMethod": {"type": "period", "value": "180"}, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                                    if Snooz_noweb in (200,201):
-                                        return "Snoozed"
-                                    else:
-                                        return "Snooze Failed"
-                                else:
-                                    return "Assign Failed"
-                            else:
-                                f_id_to_move = "64197f01a6dcff6572453ead"
-
+                    
                     As, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/force-assign", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
-                    if As in (200, 201):
-                        if f_id_to_move == "5dc586332799a51cc0ff2e36" and feed_status != 422:
+                    if As not in (200, 201):
+                        return "Assign Failed"
+                        
+                    if is_full_success_typec:
+                        f_id_to_move = "5dc5863a2799a51cc0ff30e2"
+                        if feed_status != 422:
                             await update_manual_curation_date(session, dp_id, tracxn_limiter, HEADERS)
                         ms, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": [f_id_to_move], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                        if ms == 400 and f_id_to_move != "64197f01a6dcff6572453ead":
-                            ms2, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/move", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "movedTo": ["64197f01a6dcff6572453ead"], "sourceDetails": {"source": "Write API"}}, headers=HEADERS)
-                            return ms2
                         return ms
-                    return "Assign Failed"
+                    else:
+                        Snooz_noweb, _ = await call_tracxn_api(session, "https://platform.tracxn.com/data/funnel-action/snooze", tracxn_limiter, method="put", json_data={"funnelId": funnel_id, "domainProfileId": dp_id, "snoozeMethod": {"type": "period", "value": "180"}, "sourceDetails": {"source": "Write API"}, "comment": "This is done by Write API"}, headers=HEADERS)
+                        if Snooz_noweb in (200, 201):
+                            return "Snoozed"
+                        else:
+                            return "Snooze Failed"
+
                     
                 (s1, _), (s_f, _) = await asyncio.gather(update_dp(), update_bm())
                 ms = await update_funnel(s_f)
