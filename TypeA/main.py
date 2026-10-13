@@ -712,7 +712,7 @@ class TypeAPipeline:
         f_defs = {}
         for sid in [CONFIG["FEED_DEF_SHEET_ID_1"], CONFIG["FEED_DEF_SHEET_ID_2"]]:
             try:
-                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition")).get_values()
+                fd_data = await (await (await gc.open_by_key(sid)).worksheet("Feed Definition (Worked)")).get_values()
                 for r in fd_data[1:]:
                     if len(r) > 3: f_defs[r[1]] = r[3]
             except: pass

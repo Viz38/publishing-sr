@@ -609,6 +609,11 @@ def is_valid_job_id(job_id: str) -> bool:
 
 # ----------------- DECOUPLED PIPELINE ARCHITECTURE --------------------
 
+# Polling schedule constants
+POLL_1_DELAY_SECONDS = 45 * 60        # 45 minutes after job creation
+POLL_2_DELAY_SECONDS = (45 + 60) * 60 # 105 minutes after job creation (45 + extra 60)
+MAX_POLLS_PER_JOB = 2
+
 @dataclass
 class DomainTask:
     row_idx: int
@@ -624,6 +629,11 @@ class DomainTask:
     home_content: str = ""
     category_contents: Dict[str, str] = field(default_factory=dict)
     start_time: float = field(default_factory=time.time)
+    # Polling state: tracks how many times each job has been polled
+    poll_count: int = 0                     # total polls fired for this task
+    next_poll_time: float = field(default_factory=lambda: time.time() + POLL_1_DELAY_SECONDS)
+    # Creation timestamp — set once, never overwritten on poll updates
+    created_at: str = field(default_factory=lambda: datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
 
 created_tasks_registry: Dict[str, DomainTask] = {}
 sheet_update_queue: asyncio.Queue = asyncio.Queue()
@@ -828,19 +838,125 @@ async def run_batch_pipeline(
         gen_window_sec = CONFIG["GENERATE_WINDOW_MINUTES"] * 60
 
         logger.info("\n=======================================================")
-        logger.info(f"BATCH #{batch_num}: Starting Job ID Generation Phase (Max {CONFIG['GENERATE_WINDOW_MINUTES']} mins)...")
+        logger.info(f"BATCH #{batch_num}: Starting concurrent Generation + Polling...")
         logger.info(f"Starting at sheet row {next_row_idx} of {len(rows)}")
         logger.info("=======================================================\n")
 
         active_gen_tasks = set()
 
+        # Signal set once generation finishes so the poller knows to wrap up
+        generation_done_ev = asyncio.Event()
+
+        # Capture batch_num for async closures
+        _bn = batch_num
+        _sweep_box = [0]
+
+        async def _sweep_one_pass():
+            nonlocal success_count, fail_count
+            sweep_sem = asyncio.Semaphore(50)
+
+            async def _sweep_domain(task):
+                nonlocal success_count, fail_count
+                async with sweep_sem:
+                    was_processing = task_needs_polling(task)
+                    await check_single_task_jobs(session, task)
+                    still_processing = task_needs_polling(task)
+
+                    # Always push sheet update after poll (updates poll-count column)
+                    await sheet_update_queue.put(task)
+
+                    if was_processing and not still_processing:
+                        if task.home_status == "SUCCESS" or any(
+                            s == "SUCCESS" for s in task.category_statuses.values()
+                        ):
+                            success_count += 1
+                        else:
+                            fail_count += 1
+                        update_progress_file(processed_count, total_rows, success_count, fail_count)
+
+                        home_about_text = (
+                            (task.home_content or "") + "\n\n" +
+                            (task.category_contents.get("About") or "")
+                        )
+                        rest_parts = [
+                            task.category_contents[c]
+                            for c in OTHER_PAGES if task.category_contents.get(c)
+                        ]
+                        rest_text = "\n\n".join(rest_parts) if rest_parts else None
+                        pages_val = "home,about," + ",".join(
+                            [c.lower() for c in OTHER_PAGES if task.category_contents.get(c)]
+                        )
+                        await save_to_supabase(task.domain, home_about_text.strip(), rest_text, pages_val)
+                        logger.info(
+                            f"REAL-TIME PUSH: Streamed final update for {task.domain} to Google Sheet queue."
+                        )
+
+            ready = [t for t in batch_tasks.values() if is_task_ready_to_poll(t)]
+            if ready:
+                _sweep_box[0] += 1
+                pending_count = len([t for t in batch_tasks.values() if task_needs_polling(t)])
+                logger.info(
+                    f"BATCH #{_bn} Sweep #{_sweep_box[0]}: "
+                    f"{len(ready)} domains ready to poll "
+                    f"({pending_count - len(ready)} still waiting for scheduled poll time)..."
+                )
+                await asyncio.gather(*[_sweep_domain(t) for t in ready])
+
+        async def _background_poller():
+            """
+            Runs CONCURRENTLY with the generation loop.
+            Wakes every 30 s, polls any task whose next_poll_time has arrived.
+            Exits only after generation is done AND all tasks have exhausted their polls.
+            """
+            logger.info(
+                f"BATCH #{_bn}: Background poller started "
+                f"(wakes every 30 s; fires at 45 min / 105 min from job creation)."
+            )
+            while True:
+                if os.path.exists(STOP_FILE):
+                    break
+
+                await _sweep_one_pass()
+
+                still_pending = [t for t in batch_tasks.values() if task_needs_polling(t)]
+
+                # Done: generation finished and all tasks resolved
+                if generation_done_ev.is_set() and not still_pending:
+                    logger.info(f"BATCH #{_bn}: All domain jobs reached terminal status!")
+                    break
+
+                # Done: generation finished and no more polls possible
+                if generation_done_ev.is_set() and still_pending:
+                    due_times = [
+                        t.next_poll_time for t in still_pending if t.poll_count < MAX_POLLS_PER_JOB
+                    ]
+                    if not due_times:
+                        break
+                    remaining = min(due_times) - time.time()
+                    if remaining > 30:
+                        logger.info(
+                            f"BATCH #{_bn}: Next poll due in {round(remaining / 60, 1)} min. "
+                            "Sleeping 30 s then rechecking..."
+                        )
+
+                await asyncio.sleep(30)
+
+            logger.info(f"BATCH #{_bn}: Background poller finished.")
+
+        # Launch the background poller concurrently with generation
+        poller_task = asyncio.create_task(_background_poller())
+
+        # Generation loop (runs at the same time as the poller)
         while next_row_idx <= len(rows):
             if os.path.exists(STOP_FILE):
                 break
 
             elapsed_gen = time.time() - gen_start_time
             if elapsed_gen >= gen_window_sec:
-                logger.info(f"Generation window limit ({CONFIG['GENERATE_WINDOW_MINUTES']} mins) reached for Batch #{batch_num}.")
+                logger.info(
+                    f"Generation window limit ({CONFIG['GENERATE_WINDOW_MINUTES']} mins) "
+                    f"reached for Batch #{batch_num}."
+                )
                 break
 
             row = rows[next_row_idx - 1]
@@ -873,85 +989,69 @@ async def run_batch_pipeline(
         if active_gen_tasks:
             await asyncio.gather(*active_gen_tasks)
 
-        logger.info(f"BATCH #{batch_num}: Generation Phase complete! Generated/queued {len(batch_tasks)} active domains.")
+        logger.info(
+            f"BATCH #{batch_num}: Generation Phase complete! "
+            f"Generated/queued {len(batch_tasks)} active domains."
+        )
+
+        # Signal the poller that no new tasks will arrive
+        generation_done_ev.set()
 
         if not batch_tasks:
+            poller_task.cancel()
+            try:
+                await poller_task
+            except asyncio.CancelledError:
+                pass
             if next_row_idx > len(rows):
                 logger.info("No more domains remaining to process.")
                 break
             continue
 
         logger.info("\n-------------------------------------------------------")
-        logger.info(f"BATCH #{batch_num}: Starting Tracking Phase for {len(batch_tasks)} generated domains...")
-        logger.info(f"Polling status every {CONFIG['POLL_INTERVAL_SECONDS']}s for up to {CONFIG['MAX_BATCH_TRACKING_MINUTES']} mins...")
+        logger.info(
+            f"BATCH #{batch_num}: Generation done. "
+            f"Poller tracking {len(batch_tasks)} domains until all resolved..."
+        )
         logger.info("-------------------------------------------------------\n")
 
-        track_start_time = time.time()
-        max_track_sec = CONFIG["MAX_BATCH_TRACKING_MINUTES"] * 60
-        sweep_count = 0
-
-        while True:
-            if os.path.exists(STOP_FILE):
-                break
-
-            active_polling_tasks = [t for t in batch_tasks.values() if task_needs_polling(t)]
-            if not active_polling_tasks:
-                logger.info(f"BATCH #{batch_num}: All {len(batch_tasks)} domain jobs in this batch reached terminal status!")
-                break
-
-            elapsed_track = time.time() - track_start_time
-            if elapsed_track >= max_track_sec:
-                logger.info(f"BATCH #{batch_num}: Tracking window limit ({CONFIG['MAX_BATCH_TRACKING_MINUTES']} mins) reached.")
-                break
-
-            sweep_count += 1
-            logger.info(f"BATCH #{batch_num} Sweep #{sweep_count}: Polling {len(active_polling_tasks)} active domains...")
-
-            sweep_sem = asyncio.Semaphore(50)
-
-            async def _sweep_domain(task: DomainTask):
-                nonlocal success_count, fail_count
-                async with sweep_sem:
-                    was_processing = task_needs_polling(task)
-                    await check_single_task_jobs(session, task)
-                    still_processing = task_needs_polling(task)
-
-                    if was_processing and not still_processing:
-                        if task.home_status == "SUCCESS" or any(s == "SUCCESS" for s in task.category_statuses.values()):
-                            success_count += 1
-                        else:
-                            fail_count += 1
-                        update_progress_file(processed_count, total_rows, success_count, fail_count)
-
-                        home_about_text = (task.home_content or "") + "\n\n" + (task.category_contents.get("About") or "")
-                        rest_parts = [task.category_contents[c] for c in OTHER_PAGES if task.category_contents.get(c)]
-                        rest_text = "\n\n".join(rest_parts) if rest_parts else None
-                        pages_val = "home,about," + ",".join([c.lower() for c in OTHER_PAGES if task.category_contents.get(c)])
-
-                        await save_to_supabase(task.domain, home_about_text.strip(), rest_text, pages_val)
-                        await sheet_update_queue.put(task)
-                        logger.info(f"REAL-TIME PUSH: Streamed SUCCESS update for {task.domain} to Google Sheet queue.")
-
-            await asyncio.gather(*[_sweep_domain(t) for t in active_polling_tasks])
-            await asyncio.sleep(CONFIG["POLL_INTERVAL_SECONDS"])
+        # Wait for the background poller to finish all remaining polls
+        await poller_task
 
         logger.info(f"BATCH #{batch_num} complete! Moving to next batch...\n")
         batch_num += 1
 
     await sheet_update_queue.put(None)
 
-# 2. CYCLICAL BATCH POLLER WITH MAX JOB AGE SAFEGUARD
+
+# 2. SMART POLLER — max 2 polls per job, fixed schedule (45 min / 105 min)
+def is_task_ready_to_poll(task: DomainTask) -> bool:
+    """Returns True if the task has PROCESSING jobs AND it's past the next scheduled poll time."""
+    if task.poll_count >= MAX_POLLS_PER_JOB:
+        return False
+    if not task_needs_polling(task):
+        return False
+    return time.time() >= task.next_poll_time
+
 async def check_single_task_jobs(session: aiohttp.ClientSession, task: DomainTask):
-    job_age = time.time() - task.start_time
-    if job_age > CONFIG["MAX_JOB_AGE_SECONDS"]:
-        logger.warning(f"POLLER SAFEGUARD: Job for {task.domain} exceeded max age ({round(job_age/60)} mins). Marking THRESHOLD REACHED.")
-        if task.home_status == "PROCESSING":
-            task.home_status = "THRESHOLD REACHED"
-        for cat in ALL_CATEGORIES:
-            if task.category_statuses.get(cat) == "PROCESSING":
-                task.category_statuses[cat] = "THRESHOLD REACHED"
+    """Poll all PROCESSING job IDs for a task exactly once per call.
+    Enforces max 2 polls: poll-1 at 45 min, poll-2 at 105 min from job creation.
+    After the 2nd poll, any still-PROCESSING job is marked THRESHOLD REACHED.
+    """
+    now = time.time()
+
+    # Guard: only poll when scheduled
+    if now < task.next_poll_time:
         return
 
+    task.poll_count += 1
+    current_poll = task.poll_count
+    logger.info(
+        f"POLLER: [{task.domain}] Starting poll #{current_poll}/{MAX_POLLS_PER_JOB} "
+        f"(job age: {round((now - task.start_time)/60, 1)} min)"
+    )
+
+    # Poll homepage
     if is_valid_job_id(task.homepage_job_id) and task.home_status == "PROCESSING":
         try:
             res = await get_job_status(session, task.homepage_job_id, task.token)
@@ -964,8 +1064,9 @@ async def check_single_task_jobs(session: aiohttp.ClientSession, task: DomainTas
                     html = await fetch_html_content(session, signed)
                     task.home_content = clean_html(html)
         except Exception as e:
-            logger.warning(f"POLLER SWEEP: Error tracking homepage for {task.domain}: {e}")
+            logger.warning(f"POLLER: Error tracking homepage for {task.domain} (poll #{current_poll}): {e}")
 
+    # Poll category pages
     async def _check_cat(cat: str):
         j_id = task.category_job_ids.get(cat, "")
         if is_valid_job_id(j_id) and task.category_statuses.get(cat) == "PROCESSING":
@@ -980,57 +1081,113 @@ async def check_single_task_jobs(session: aiohttp.ClientSession, task: DomainTas
                         html = await fetch_html_content(session, signed)
                         task.category_contents[cat] = clean_html(html)
             except Exception as e:
-                logger.warning(f"POLLER SWEEP: Error tracking {cat} for {task.domain}: {e}")
+                logger.warning(f"POLLER: Error tracking {cat} for {task.domain} (poll #{current_poll}): {e}")
 
     cat_tasks = [_check_cat(cat) for cat in ALL_CATEGORIES if is_valid_job_id(task.category_job_ids.get(cat, ""))]
     if cat_tasks:
         await asyncio.gather(*cat_tasks)
 
+    # After 2nd (final) poll — mark any remaining PROCESSING as THRESHOLD REACHED
+    if current_poll >= MAX_POLLS_PER_JOB:
+        marked = []
+        if task.home_status == "PROCESSING":
+            task.home_status = "THRESHOLD REACHED"
+            marked.append("home")
+        for cat in ALL_CATEGORIES:
+            if task.category_statuses.get(cat) == "PROCESSING":
+                task.category_statuses[cat] = "THRESHOLD REACHED"
+                marked.append(cat)
+        if marked:
+            logger.warning(
+                f"POLLER: [{task.domain}] Final poll #{current_poll} done — "
+                f"marking THRESHOLD REACHED for: {marked}"
+            )
+    else:
+        # Schedule the 2nd poll: 60 minutes after the 1st poll
+        task.next_poll_time = now + 60 * 60
+        logger.info(
+            f"POLLER: [{task.domain}] Poll #{current_poll} done. "
+            f"Next poll scheduled at +60 min "
+            f"(~{round((task.next_poll_time - task.start_time)/60, 0)} min from job start)"
+        )
+
 # 3. REAL-TIME SHEET STREAMING SYNCER
+# Column layout (B=col2 to BG=col59, 58 cols written as row_vals[1:])
+# [1]  B  = created_at      (NEVER overwritten -- always use task.created_at)
+# [2]  C  = homepage_job_id
+# [3]  D  = about_job_id
+# [4]  E  = about_link
+# [5]  F  = home_s3
+# [6]  G  = home_content
+# [7]  H  = about_s3
+# [8]  I  = about_content
+# [9]  J  = home_status
+# [10] K  = about_status
+# [11] L  = last_updated
+# [12] M  = elapsed_seconds
+# [13..57] N..BF = OTHER_PAGES (job_id, link, s3, content, status) x9 = 45 cols
+# [58] BG = poll_count
+def _build_row_vals(task):
+    row_vals = [""] * 59       # indices 0-58 -> cols A-BG; only [1:] written -> B:BG
+    row_vals[0]  = task.domain
+    row_vals[1]  = task.created_at                                  # col B -- NEVER changes
+    row_vals[2]  = task.homepage_job_id
+    row_vals[3]  = task.category_job_ids.get("About", "")
+    row_vals[4]  = task.category_links.get("About") or "No About Link"
+    row_vals[5]  = task.home_s3
+    row_vals[6]  = task.home_content[:20000] if task.home_content else ""
+    row_vals[7]  = task.category_s3s.get("About", "")
+    row_vals[8]  = task.category_contents.get("About", "")[:20000] if task.category_contents.get("About") else ""
+    row_vals[9]  = task.home_status                                 # col J
+    row_vals[10] = task.category_statuses.get("About", "N/A")      # col K
+    from datetime import datetime
+    import time as _time
+    row_vals[11] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")    # col L -- last updated
+    row_vals[12] = str(round(_time.time() - task.start_time, 2))   # col M -- elapsed
+
+    curr = 13
+    for cat in OTHER_PAGES:
+        row_vals[curr]   = task.category_job_ids.get(cat, "")
+        row_vals[curr+1] = task.category_links.get(cat) or "N/A"
+        row_vals[curr+2] = task.category_s3s.get(cat, "")
+        row_vals[curr+3] = task.category_contents.get(cat, "")[:20000] if task.category_contents.get(cat) else ""
+        row_vals[curr+4] = task.category_statuses.get(cat, "N/A")
+        curr += 5
+    # curr ends at 13 + 9*5 = 58
+
+    row_vals[58] = str(task.poll_count)                             # col BG -- poll count
+    return row_vals
+
 async def sheet_syncer(db_ws):
     logger.info("REAL-TIME SHEET SYNCER: Starting live streaming spreadsheet updater...")
 
     while True:
-        task: Optional[DomainTask] = await sheet_update_queue.get()
+        task = await sheet_update_queue.get()
         if task is None:
             sheet_update_queue.task_done()
             break
 
         async with sheet_lock:
-            row_vals = [""] * 58
-            row_vals[0] = task.domain
-            row_vals[1] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row_vals[2] = task.homepage_job_id
-            row_vals[3] = task.category_job_ids.get("About", "")
-            row_vals[4] = task.category_links.get("About") or "No About Link"
-            row_vals[5] = task.home_s3
-            row_vals[6] = task.home_content[:20000] if task.home_content else ""
-            row_vals[7] = task.category_s3s.get("About", "")
-            row_vals[8] = task.category_contents.get("About", "")[:20000] if task.category_contents.get("About") else ""
-            row_vals[9] = task.home_status
-            row_vals[10] = task.category_statuses.get("About", "N/A")
-            row_vals[11] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            row_vals[12] = str(round(time.time() - task.start_time, 2))
-
-            curr = 13
-            for cat in OTHER_PAGES:
-                row_vals[curr] = task.category_job_ids.get(cat, "")
-                row_vals[curr+1] = task.category_links.get(cat) or "N/A"
-                row_vals[curr+2] = task.category_s3s.get(cat, "")
-                row_vals[curr+3] = task.category_contents.get(cat, "")[:20000] if task.category_contents.get(cat) else ""
-                row_vals[curr+4] = task.category_statuses.get(cat, "N/A")
-                curr += 5
-
             try:
-                await db_ws.update(range_name=f"B{task.row_idx}:BF{task.row_idx}", values=[row_vals[1:]])
-                logger.info(f"REAL-TIME SHEET SYNC: Row {task.row_idx} ({task.domain}) written to Google Sheet.")
+                row_vals = _build_row_vals(task)
+                # Always write B:BG -- col B always = task.created_at (never datetime.now())
+                await db_ws.update(
+                    range_name=f"B{task.row_idx}:BG{task.row_idx}",
+                    values=[row_vals[1:]]    # 58 values -> cols B through BG
+                )
+                logger.info(
+                    f"SHEET SYNC (poll #{task.poll_count}): "
+                    f"Row {task.row_idx} ({task.domain}) written -- "
+                    f"home={task.home_status}, about={task.category_statuses.get('About','')}"
+                )
             except Exception as e:
                 logger.error(f"SHEET SYNCER: Failed row update for {task.domain}: {e}")
 
         sheet_update_queue.task_done()
-        await asyncio.sleep(0.1)
+        await asyncio.sleep(0.05)
 
     logger.info("REAL-TIME SHEET SYNCER: All live updates written to Google Sheet.")
+
 
 async def safe_get_all_values(ws):
     if hasattr(ws, "get_all_values"):
