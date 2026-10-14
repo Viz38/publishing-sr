@@ -668,7 +668,7 @@ class TypeBPipeline:
                         
                         if is_full_success:
                             tags = hashtags + ["bu_Internal_SRprocess_TypeB"]
-                            tags = [h for h in tags if h.lower() != "bu_llm_sr_incorrectprediction"]
+                            tags = [h for h in tags if h.lower() != "bu_llm_sr_incorrectprediction" and h.lower() != "bu_Internal_SRprocess_TypeB"]
                         else:
                             if "bu_llm_sr_incorrectprediction" not in tags:
                                 tags.append("bu_llm_sr_incorrectprediction")
@@ -779,11 +779,11 @@ class TypeBPipeline:
                 pipeline_logger.info(f"TEST LOG [{domain}]: is_success={is_success} | is_full_success={is_full_success} | fail_reason='{fail_reason}' | has_incorrect_pred_tag={has_incorrect_pred_tag} | funnel_status={ms}")
                 
                 if is_success:
-                    not_updated_text = "NotUpdated"
+                    not_updated_text = "Irrelevant"
                 elif fail_reason in ("Low Content", "Low content"):
-                    not_updated_text = "Low Content"
+                    not_updated_text = "NoWebscrap"
                 elif fail_reason == "Parked":
-                    not_updated_text = "Parked"
+                    not_updated_text = "NoWebscrap"
                 elif fail_reason.startswith("Missing"):
                     not_updated_text = "Irrelevant"
                 elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":

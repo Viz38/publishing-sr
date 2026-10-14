@@ -1090,6 +1090,8 @@ class TypeAPipeline:
                 
                 if not is_success:
                     fail_reason = res.get('reason', 'Failed')
+                elif not is_full_success and res["bmr1"].startswith("No Results"):
+                    fail_reason = "Irrelavent"
                 elif not is_full_success:
                     fail_reason = "Missing BM match"
                 else:
@@ -1098,11 +1100,13 @@ class TypeAPipeline:
                 # pipeline_logger.info(f"TEST LOG [{domain}]: is_success={is_success} | is_full_success={is_full_success} | fail_reason='{fail_reason}' | has_incorrect_pred_tag={has_incorrect_pred_tag} | funnel_status={ms}")
                 
                 if fail_reason in ("Low Content", "Low content"):
-                    not_updated_text = "Low Content"
+                    not_updated_text = "NoWebscrap"
                 elif fail_reason == "Parked":
-                    not_updated_text = "Parked"
+                    not_updated_text = "NoWebscrap"
+                elif fail_reason =="Irrelavent":
+                    not_updated_text = "Irrelavent"
                 elif fail_reason.startswith("Missing"):
-                    not_updated_text = "Irrelevant"
+                    not_updated_text = "NoBmMatch"
                 elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
                     not_updated_text = "NoWebscrap"
                 else:

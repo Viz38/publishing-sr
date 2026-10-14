@@ -680,7 +680,7 @@ class TypeCPipeline:
                     f_stat = "Done" if s_f in (200, 201) else ("Duplicate/Already Moved" if s_f == 422 else ("Funnel State Conflicts" if s_f == 400 else str(s_f)))
                     fun = "Done" if ms in (200, 201) else ("Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err"))
                 else:
-                    f_stat = "N/A"
+                    f_stat = "NoWebScrap"
                     if ms in (200, 201):
                         fun = "Sent discovery"
                     elif ms == "Snoozed":
