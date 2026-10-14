@@ -663,6 +663,7 @@ class TypeBPipeline:
                     ld = res.get("ld") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         hashtags = list(initial_hashtags)
+                        tags = [h for h in tags if h.lower() != "bu_Internal_SRprocess_TypeB"]
                         tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
                         if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
                         
