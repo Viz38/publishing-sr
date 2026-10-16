@@ -108,7 +108,7 @@ NEW_FUNCTION = '''async def run_batch_pipeline(
             """
             logger.info(
                 f"BATCH #{_bn}: Background poller started "
-                f"(wakes every 30 s; fires at 45 min / 105 min from job creation)."
+                f"(wakes every 30 s; fires at 45 min / 90 min from job creation)."
             )
             while True:
                 if os.path.exists(STOP_FILE):

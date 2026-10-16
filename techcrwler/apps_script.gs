@@ -9,11 +9,11 @@
 const CONFIG = {
   TYPE: 'TechCrawler',
   WORKER_URLS: [
-    { name: '4230-TechCrawler-Pipeline', url: 'https://4230-techcrwler.ecosuyaenergies.com' },
-    { name: '4990-TechCrawler-Pipeline', url: 'https://4990-techcrwler.ecosuyaenergies.com' },
-    { name: 'Rajath-TechCrawler-Pipeline', url: 'https://rajath-techcrwler.ecosuyaenergies.com' },
-    { name: 'Vishnu-TechCrawler-Pipeline', url: 'https://vishnu-techcrwler.ecosuyaenergies.com' },
-    { name: 'Keshav-TechCrawler-Pipeline', url: 'https://keshava-techcrwler.ecosuyaenergies.com' }
+    { name: '4230-TechCrawler-Pipeline', url: 'https://4230-techcrwler.rajath.world' },
+    { name: '4990-TechCrawler-Pipeline', url: 'https://4990-techcrwler.rajath.world' },
+    { name: 'Rajath-TechCrawler-Pipeline', url: 'https://rajath-techcrwler.rajath.world' },
+    { name: 'Vishnu-TechCrawler-Pipeline', url: 'https://vishnu-techcrwler.rajath.world' },
+    { name: 'Keshav-TechCrawler-Pipeline', url: 'https://keshava-techcrwler.rajath.world' }
   ],
   AUTH_TOKEN: 'Tracxn@SR',
   DEFAULT_MODE: 'full',

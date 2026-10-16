@@ -664,7 +664,7 @@ class TypeBPipeline:
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         hashtags = list(initial_hashtags)
                         tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
-                        tags = [h for h in tags if h.lower() != "bu_Internal_SRprocess_TypeB"]
+                        tags = [h for h in tags if h.lower() != "bu_internal_srprocess_typeb"]
                         if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
                         
                         if is_full_success:
@@ -788,7 +788,7 @@ class TypeBPipeline:
                 elif fail_reason.startswith("Missing"):
                     not_updated_text = "Irrelevant"
                 elif fail_reason.startswith("LLM failed") or fail_reason == "Unable To Scrap":
-                    not_updated_text = "NotUpdated"
+                    not_updated_text = "NoWebscrap"
                 else:
                     not_updated_text = "Irrelevant"
                 

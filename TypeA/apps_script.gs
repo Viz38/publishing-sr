@@ -9,11 +9,11 @@
 const CONFIG = {
   TYPE: 'A',
   WORKER_URLS: [
-    { name: '4230-TypeA-Pipeline', url: 'https://4230-type-A.ecosuyaenergies.com' },
-    { name: '4990-TypeA-Pipeline', url: 'https://4990-type-A.ecosuyaenergies.com' },
-    { name: 'Rajath-TypeA-Pipeline', url: 'https://rajath-type-A.ecosuyaenergies.com' },
-    { name: 'Vishnu-TypeA-Pipeline', url: 'https://vishnu-typea.ecosuyaenergies.com' },
-    { name: 'Keshav-TypeA-Pipeline', url: 'https://keshav-Typea-Pipeline.ecosuyaenergies.com' }
+    { name: '4230-TypeA-Pipeline', url: 'https://4230-type-A.rajath.world' },
+    { name: '4990-TypeA-Pipeline', url: 'https://4990-type-A.rajath.world' },
+    { name: 'Rajath-TypeA-Pipeline', url: 'https://rajath-type-A.rajath.world' },
+    { name: 'Vishnu-TypeA-Pipeline', url: 'https://vishnu-typea.rajath.world' },
+    { name: 'Keshav-TypeA-Pipeline', url: 'https://keshav-Typea-Pipeline.rajath.world' }
   ],
   AUTH_TOKEN: 'Tracxn@SR',
   DEFAULT_MODE: 'full',

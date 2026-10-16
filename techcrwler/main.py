@@ -610,8 +610,8 @@ def is_valid_job_id(job_id: str) -> bool:
 # ----------------- DECOUPLED PIPELINE ARCHITECTURE --------------------
 
 # Polling schedule constants
-POLL_1_DELAY_SECONDS = 45 * 60        # 45 minutes after job creation
-POLL_2_DELAY_SECONDS = (45 + 60) * 60 # 105 minutes after job creation (45 + extra 60)
+POLL_1_DELAY_SECONDS = 45 * 60        # 45 minutes after job creation (1st poll)
+POLL_2_DELAY_SECONDS = 90 * 60        # 90 minutes after job creation (2nd poll / re-poll)
 MAX_POLLS_PER_JOB = 2
 
 @dataclass
@@ -675,6 +675,7 @@ async def process_single_domain_producer(
         access_keys = CONFIG["ACCESS_KEYS"]
         token = access_keys[idx % len(access_keys)]
         
+        existing_created_at = row[1].strip() if len(row) > 1 else ""
         existing_home_job_id = row[2].strip() if len(row) > 2 else ""
         existing_about_job_id = row[3].strip() if len(row) > 3 else ""
         existing_about_link = row[4].strip() if len(row) > 4 else ""
@@ -712,6 +713,11 @@ async def process_single_domain_producer(
             existing_cat_statuses[cat] = st
             curr += 5
 
+        # Read existing poll_count from column BG (index 58)
+        existing_poll_count = 0
+        if len(row) > 58 and row[58].strip().isdigit():
+            existing_poll_count = int(row[58].strip())
+
         home_is_terminal = is_terminal_status(existing_home_status)
         all_cats_terminal = all(is_terminal_status(existing_cat_statuses.get(cat, "")) for cat in ALL_CATEGORIES)
 
@@ -729,6 +735,48 @@ async def process_single_domain_producer(
             await sheet_update_queue.put(task)
             return task
 
+        # Check if job IDs were already created in a previous run
+        has_existing_jobs = is_valid_job_id(existing_home_job_id) or any(
+            is_valid_job_id(j) for j in existing_cat_job_ids.values()
+        )
+
+        parsed_start_time = None
+        if existing_created_at:
+            try:
+                dt = datetime.strptime(existing_created_at, "%Y-%m-%d %H:%M:%S")
+                parsed_start_time = dt.timestamp()
+            except Exception:
+                parsed_start_time = None
+
+        now_ts = time.time()
+        if has_existing_jobs and parsed_start_time is not None:
+            task_start_time = parsed_start_time
+            task_created_at = existing_created_at
+            elapsed = now_ts - task_start_time
+
+            if existing_poll_count >= MAX_POLLS_PER_JOB:
+                task_poll_count = existing_poll_count
+                task_next_poll = now_ts  # ready to be finalized
+            elif existing_poll_count == 1:
+                task_poll_count = 1
+                if elapsed >= POLL_2_DELAY_SECONDS:
+                    task_next_poll = now_ts  # overdue for 2nd poll (90 min)
+                else:
+                    task_next_poll = task_start_time + POLL_2_DELAY_SECONDS
+            else:
+                task_poll_count = 0
+                if elapsed >= POLL_2_DELAY_SECONDS:
+                    task_next_poll = now_ts  # overdue for 2nd poll
+                elif elapsed >= POLL_1_DELAY_SECONDS:
+                    task_next_poll = now_ts  # overdue for 1st poll (45 min)
+                else:
+                    task_next_poll = task_start_time + POLL_1_DELAY_SECONDS
+        else:
+            task_start_time = now_ts
+            task_created_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            task_poll_count = 0
+            task_next_poll = now_ts + POLL_1_DELAY_SECONDS
+
         task = DomainTask(
             row_idx=idx,
             domain=domain,
@@ -741,7 +789,11 @@ async def process_single_domain_producer(
             home_s3=existing_home_s3,
             category_s3s=existing_cat_s3s,
             home_content=existing_home_content,
-            category_contents=existing_cat_contents
+            category_contents=existing_cat_contents,
+            start_time=task_start_time,
+            poll_count=task_poll_count,
+            next_poll_time=task_next_poll,
+            created_at=task_created_at
         )
 
         need_discovery = any(not task.category_links.get(cat) and not is_terminal_status(task.category_statuses.get(cat, "")) for cat in ALL_CATEGORIES)
@@ -757,6 +809,7 @@ async def process_single_domain_producer(
                     task.category_links[cat] = lnk
 
         creation_tasks = []
+        new_jobs_created = [False]
 
         if not task.homepage_job_id and not is_terminal_status(task.home_status):
             async def submit_home():
@@ -764,6 +817,7 @@ async def process_single_domain_producer(
                     try:
                         task.homepage_job_id = await create_scraper_job(session, normalize_url(domain), token)
                         task.home_status = "PROCESSING"
+                        new_jobs_created[0] = True
                         logger.info(f"PRODUCER: Generated homepage Job ID ({task.homepage_job_id}) for {domain}")
                     except Exception as e:
                         logger.error(f"PRODUCER: Failed homepage job for {domain}: {e}")
@@ -784,6 +838,7 @@ async def process_single_domain_producer(
                                 j_id = await create_scraper_job(session, u, token)
                                 task.category_job_ids[c] = j_id
                                 task.category_statuses[c] = "PROCESSING"
+                                new_jobs_created[0] = True
                                 logger.info(f"PRODUCER: Generated {c} Job ID ({j_id}) for {domain}")
                             except Exception as e:
                                 logger.error(f"PRODUCER: Failed {c} job for {domain}: {e}")
@@ -800,8 +855,11 @@ async def process_single_domain_producer(
         if task_needs_polling(task):
             async with registry_lock:
                 created_tasks_registry[domain] = task
-            await sheet_update_queue.put(task)
-            logger.info(f"REAL-TIME PUSH: Streamed Job IDs / status for {domain} to Google Sheet queue.")
+            # ONLY stream to Google Sheet queue if brand-new jobs were created.
+            # Existing jobs from sheet do not need to be re-pushed at startup.
+            if new_jobs_created[0]:
+                await sheet_update_queue.put(task)
+                logger.info(f"REAL-TIME PUSH: Streamed newly generated Job IDs / status for {domain} to Google Sheet queue.")
 
         return task
 
@@ -910,7 +968,7 @@ async def run_batch_pipeline(
             """
             logger.info(
                 f"BATCH #{_bn}: Background poller started "
-                f"(wakes every 30 s; fires at 45 min / 105 min from job creation)."
+                f"(wakes every 30 s; fires at 45 min / 90 min from job creation)."
             )
             while True:
                 if os.path.exists(STOP_FILE):
@@ -1103,12 +1161,13 @@ async def check_single_task_jobs(session: aiohttp.ClientSession, task: DomainTas
                 f"marking THRESHOLD REACHED for: {marked}"
             )
     else:
-        # Schedule the 2nd poll: 60 minutes after the 1st poll
-        task.next_poll_time = now + 60 * 60
+        # Schedule the 2nd poll (re-poll) at 90 min from job creation
+        task.next_poll_time = max(now + 30, task.start_time + POLL_2_DELAY_SECONDS)
         logger.info(
             f"POLLER: [{task.domain}] Poll #{current_poll} done. "
-            f"Next poll scheduled at +60 min "
-            f"(~{round((task.next_poll_time - task.start_time)/60, 0)} min from job start)"
+            f"Re-poll scheduled at 90 min from creation "
+            f"(in ~{round((task.next_poll_time - now)/60, 1)} min; "
+            f"total ~{round((task.next_poll_time - task.start_time)/60, 0)} min from job start)"
         )
 
 # 3. REAL-TIME SHEET STREAMING SYNCER
@@ -1175,8 +1234,9 @@ async def sheet_syncer(db_ws):
                     range_name=f"B{task.row_idx}:BG{task.row_idx}",
                     values=[row_vals[1:]]    # 58 values -> cols B through BG
                 )
+                sync_label = f"poll #{task.poll_count}" if task.poll_count > 0 else "creation"
                 logger.info(
-                    f"SHEET SYNC (poll #{task.poll_count}): "
+                    f"SHEET SYNC ({sync_label}): "
                     f"Row {task.row_idx} ({task.domain}) written -- "
                     f"home={task.home_status}, about={task.category_statuses.get('About','')}"
                 )
