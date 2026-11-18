@@ -133,28 +133,89 @@ async def save_snapshot(domain: str, html: str, reason: str):
 # Global fetcher instance
 fetcher = StealthFetcher()
 
-def get_column_mapping(is_shifted: bool) -> Dict[str, Any]:
+def merge_and_extract_json(input_text, sf_arr=None):
+    if isinstance(input_text, list):
+        afs_arr = input_text
+    else:
+        json_patterns = [
+            r'```json\s*(\[\s*\{.*?\])\s*```',
+            r'JSON:\s*(\[\s*\{.*?\])',
+            r'(\[\s*\{.*?\}\s*\])',
+            r'(\[\s*\{.*?\])'
+        ]
+        json_str = None
+        for pattern in json_patterns:
+            match = re.search(pattern, str(input_text), re.DOTALL)
+            if match:
+                json_str = match.group(1)
+                break
+        
+        if not json_str:
+            return None
+            
+        try:
+            json_str = json_str.replace("'", '"')
+            json_str = re.sub(r':\s*(YES|NO)\s*([,}])', r': "\1"\2', json_str)
+            json_str = re.sub(r',\s*\]', ']', json_str)
+            afs_arr = json.loads(json_str)
+        except json.JSONDecodeError:
+            return None
+
+    sf_arr = sf_arr or []
+    try:
+        afs_dict = {item['id']: item['value'] for item in afs_arr if 'id' in item}
+        sf_dict = {item['id']: item['value'] for item in sf_arr if 'id' in item}
+        merged_dict = {**afs_dict, **sf_dict}
+        return [{'id': k, 'value': v} for k, v in merged_dict.items()]
+    except (KeyError, TypeError):
+        return None
+
+def get_column_mapping(is_shifted: bool, headers: Optional[List[str]] = None) -> Dict[str, Any]:
     """Returns deterministic column mapping based on whether the sheet is shifted."""
     if is_shifted:
         return {
-            "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6,
-            "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 21,
-            "r1": "J", "r2": "T", "r3": "U", # Shifted: J-T, U-W
-            "raw_data": 23, # Col X
-            "raw_data_col": "X",
-            "scraper_col": "Y",
-            "scraper_idx": 24
+            "domain": 2, "dp_id": 3, "feed": 4, "funnel_id": 5, "tags": 6, "sf": 7,
+            "skip": 8, "scrap_stat": 9, "sd": 10, "ld": 11, "feed_id": 16, "output_sf": 17,
+            "r1": "I", "r2": "R", "r3": "V", # Shifted Ranges: I-R (10 cols), V-X (3 cols)
+            "wapi_start": "S", "wapi_end": "U", # Col S, T, U
+            "raw_data": 24, # Col Y
+            "raw_data_col": "Y",
+            "scraper_col": "Z",
+            "scraper_idx": 25
         }
     else:
-        return {
-            "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5,
-            "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15,
-            "r1": "H", "r2": "S", "r3": "T", # Standard: H-S, T-V
-            "raw_data": 22, # Col W
-            "raw_data_col": "W",
-            "scraper_col": "X",
-            "scraper_idx": 23
-        }
+        # Check if Current SF column exists in standard headers
+        sf_col_idx = None
+        if headers:
+            for i, h in enumerate(headers):
+                h_clean = h.strip().lower()
+                if h_clean in ["current sf", "sf input", "special flags"]:
+                    sf_col_idx = i
+                    break
+        
+        if sf_col_idx is not None:
+            # Shifted by 1 due to Current SF
+            return {
+                "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5, "sf": sf_col_idx,
+                "skip": 7, "scrap_stat": 8, "sd": 9, "ld": 10, "feed_id": 16, "output_sf": 17,
+                "r1": "I", "r2": "R", "r3": "V",
+                "wapi_start": "S", "wapi_end": "U",
+                "raw_data": 24,
+                "raw_data_col": "Y",
+                "scraper_col": "Z",
+                "scraper_idx": 25
+            }
+        else:
+            return {
+                "domain": 1, "dp_id": 2, "feed": 3, "funnel_id": 4, "tags": 5, "sf": None,
+                "skip": 6, "scrap_stat": 7, "sd": 8, "ld": 9, "feed_id": 15, "output_sf": 16,
+                "r1": "H", "r2": "Q", "r3": "U", # Standard Ranges: H-Q (10 cols), U-W (3 cols)
+                "wapi_start": "R", "wapi_end": "T", # Col R, S, T
+                "raw_data": 23, # Col X
+                "raw_data_col": "X",
+                "scraper_col": "Y",
+                "scraper_idx": 24
+            }
 
 
 async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm_paths, bm_map, f_defs, h_map, cache_manager) -> Dict:
@@ -263,6 +324,7 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
         llm_calls += 1
         bm_res, in2, out2, think2 = res_bm_obj.text, res_bm_obj.prompt_tokens, res_bm_obj.candidate_tokens, res_bm_obj.thinking_tokens
         if res_bm_obj.thinking_text: think_text += f"BM:\n{res_bm_obj.thinking_text}\n"
+        tokens["in"] += in2; tokens["out"] += out2; tokens["think"] += think2
         if bm_res.strip().lower().startswith(("no results", "no_results", "no result", "no")):
             f_chk = "No"
         else:
@@ -279,11 +341,46 @@ async def process_domain_stage1(browser, session, row, prompts, paths, f_ids, bm
             else:
                 f_chk = "No"
 
+    is_full_success = f_chk == "Yes" and bool(bm_id)
+
+    sf_idx = h_map.get("sf")
+    pfsf_raw = row[sf_idx].strip() if sf_idx is not None and len(row) > sf_idx and row[sf_idx] else ""
+    try:
+        pfsf_arr = json.loads(pfsf_raw) if pfsf_raw and pfsf_raw != "[]" else []
+    except json.JSONDecodeError:
+        flags = [x.strip() for x in pfsf_raw.split(",") if x.strip()]
+        pfsf_arr = [{"specialFlagName": x} for x in flags]
+
+    sfarray = []
+    if is_full_success and len(prompts) > 9 and prompts[9]:
+        parts_sf = prompts[9].split("XX")
+        if len(parts_sf) == 2:
+            sys_sf = parts_sf[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_sf[1].strip()
+            user_sf = parts_sf[0].strip() + "\n\n" + ld
+            cache_id_sf = await cache_manager.get_or_create(session, "prompt_9", sys_sf, ttl="86400s")
+            flags_obj = await call_gemini_api(session, user_sf, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_sf, cached_content_name=cache_id_sf, cache_manager=cache_manager, cache_key="prompt_9")
+        else:
+            sf_prompt_raw = prompts[9].replace("XX", ld)
+            flags_obj = await call_gemini_api(session, sf_prompt_raw, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
+        llm_calls += 1
+        flags_text = flags_obj.text
+
+        in_sf, out_sf, think_sf = flags_obj.prompt_tokens, flags_obj.candidate_tokens, flags_obj.thinking_tokens
+        tokens["in"] += in_sf; tokens["out"] += out_sf; tokens["think"] += think_sf
+        if flags_obj.thinking_text: think_text += f"SF:\n{flags_obj.thinking_text}\n"
+
+        merged_sf = merge_and_extract_json(flags_text, pfsf_arr)
+        if merged_sf is not None:
+            sfarray = merged_sf
+
+    sf_val = json.dumps(sfarray) if sfarray else ""
+
     pipeline_logger.info(f"PROCESS SUCCESS: {domain} | FeedCheck: {f_chk} | BM: {bm_name} | Source: {scraper_used}")
     return {
         "type": "success", "dp_id": row[h_map["dp_id"]], "funnel_id": row[h_map["funnel_id"]], "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
+        "sf": sf_val,
         "sd": sd, "ld": ld[:40000], "bm_res": bm_res[:40000], "bm_name": bm_name, "bm_id": bm_id, "feedcheck": f_chk,
-        "tokens": {"in": in1+in2, "out": out1+out2, "think": think1+think2}, "think_text": think_text,
+        "tokens": tokens, "think_text": think_text,
         "llm_calls": llm_calls, "llm_rows": llm_rows,
         "feed_id": f_id, "body_len": len(body), "scraper_used": scraper_used,
         "raw_data": body if scraper_used == "Tech Crawler" else ""
@@ -365,9 +462,16 @@ class TypeBPipeline:
             except Exception as e:
                 pipeline_logger.error(f"Startup failed (Sheets Connection/DNS): {e}. Retrying in 10s...")
                 await asyncio.sleep(10)
-        # Determine mapping based on whether the sheet is shifted
+        # Determine mapping based on whether the sheet is shifted and inspect headers
         if data_rows:
-            h_map = get_column_mapping(is_shifted=is_shifted)
+            header_row = None
+            try:
+                h_vals = await ws.get_values("A2:AB2")
+                if h_vals:
+                    header_row = h_vals[0]
+            except Exception as e:
+                pipeline_logger.warning(f"Could not fetch headers: {e}")
+            h_map = get_column_mapping(is_shifted=is_shifted, headers=header_row)
             if is_shifted:
                 pipeline_logger.info("Detected SHIFTED column mapping (Index 2 for Domain)")
             else:
@@ -376,7 +480,11 @@ class TypeBPipeline:
             h_map = {}
         
         p_sheet = await gc.open_by_key(self.config["PROMPTS_SHEET_ID"])
-        prompts = [r[1] for r in (await (await p_sheet.worksheet("Prompts")).get_values())[1:10]]
+        p_values = await (await p_sheet.worksheet("Prompts")).get_values()
+        prompts = [r[1] for r in p_values[1:10]]
+        # SF prompt from cell B24 (Row 24) in Prompts sheet
+        sf_prompt_b = p_values[23][1] if len(p_values) > 23 and len(p_values[23]) > 1 else ""
+        prompts.append(sf_prompt_b)  # prompts[9]
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
         bm_sheet = await gc.open_by_key(self.config["BM_MAPPING_SHEET_ID"])
@@ -542,6 +650,7 @@ class TypeBPipeline:
                         else:
                             res = {"type": "failed", "reason": "Missing Phase 1 inputs"}
                     else:
+                        sf_idx = h_map.get("output_sf") or (r1_idx + 9)
                         res = {
                             "type": "success", "dp_id": dp_id, "funnel_id": funnel_id, "sd": sd, "ld": ld,
                             "feedcheck": row[r1_idx + 3] if len(row) > r1_idx + 3 else "", 
@@ -550,6 +659,7 @@ class TypeBPipeline:
                             "bm_id": row[r1_idx + 6] if len(row) > r1_idx + 6 else "",
                             "hash_status": row[r1_idx + 7] if len(row) > r1_idx + 7 else "N/A",
                             "feed_id": row[r1_idx + 8] if len(row) > r1_idx + 8 else "", 
+                            "sf": row[sf_idx] if len(row) > sf_idx and row[sf_idx] else (row[h_map["sf"]] if h_map.get("sf") is not None and len(row) > h_map["sf"] else ""),
                             "hashtags": [t.strip() for t in row[h_map["tags"]].split(",")] if row[h_map["tags"]] else [],
                             "tokens": {"in":0, "out":0, "think":0}, "body_len": int(scrap_stat.split(":")[-1]) if ":" in scrap_stat else 0
                         }
@@ -574,11 +684,11 @@ class TypeBPipeline:
                     if is_success:
                         hash_stat = res.get("hash_status") or ("Yes" if res.get("hash_removed") else "No")
                         r1, r2, r3 = h_map["r1"], h_map["r2"], h_map["r3"]
-                        r3_end = "W" if r3 == "U" else "V"
+                        r3_end = "W" if r3 == "U" else "X"
                         
-                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"]]]})
+                        await r_q.put({'range': f"{r1}{idx}:{r2}{idx}", 'values': [[f"Yes: {res.get('body_len', 0)}", res["sd"], res["ld"], res["feedcheck"], res["bm_res"], res["bm_name"], res["bm_id"], hash_stat, res["feed_id"], res.get("sf", "")]]})
                         await r_q.put({'range': f"{r3}{idx}:{r3_end}{idx}", 'values': [[res["tokens"]["in"], res["tokens"]["out"], res["tokens"].get("think", 0)]]})
-                        
+
                         scraper_col = h_map.get("scraper_col", "Y")
                         raw_data_col = h_map.get("raw_data_col", "X")
                         await r_q.put({'range': f"{scraper_col}{idx}", 'values': [[res.get("scraper_used", "BU")]]})
@@ -663,6 +773,19 @@ class TypeBPipeline:
                     ld = res.get("ld") if is_success else None
                     if sd and ld and sd != "NO_DATA" and sd != "PARKED_LLM":
                         hashtags = list(initial_hashtags)
+                        
+                        special_flags_raw = res.get("sf")
+                        if not special_flags_raw:
+                            sf_idx = h_map.get("output_sf") or h_map.get("sf")
+                            if sf_idx is not None and len(row) > sf_idx and row[sf_idx]:
+                                special_flags_raw = row[sf_idx]
+                            else:
+                                special_flags_raw = "[]"
+                        try:
+                            sf_array = json.loads(special_flags_raw) if special_flags_raw else []
+                        except json.JSONDecodeError:
+                            sf_array = []
+
                         tags = hashtags + ["bu_llm_sd_ld", "llmbasedpublishing"]
                         tags = [h for h in tags if h.lower() != "bu_internal_srprocess_typeb"]
                         if res.get("feedcheck") == "Yes": tags.append("bu_llm_businessmodel_prediction")
@@ -675,7 +798,15 @@ class TypeBPipeline:
                                 tags.append("bu_llm_sr_incorrectprediction")
                                 
                         res["hashtags"] = tags
-                        payload = {"id": dp_id, "description": {"value": ld}, "shortDescription": {"value": sd}, "keywords": {"value": {"HASHTAGS": tags}}, "publishingDepth": {"value": "Pub 2 - Partial"}}
+                        payload = {
+                            "id": dp_id, 
+                            "description": {"value": ld}, 
+                            "shortDescription": {"value": sd}, 
+                            "keywords": {"value": {"HASHTAGS": tags}}, 
+                            "publishingDepth": {"value": "Pub 2 - Partial"}
+                        }
+                        if sf_array:
+                            payload["specialFlags"] = {"value": sf_array}
                         
                         try:
                             eh_status, eh_res = await call_tracxn_api(
@@ -813,21 +944,17 @@ class TypeBPipeline:
                 else:
                     fun = "Assign Failed" if ms == "Assign Failed" else ("Funnel State Conflicts" if ms == 400 else "Err")
                 
-                if h_map["r1"] == "J":
-                    o_col, s_col = "P", "T"
-                else:
-                    o_col, s_col = "O", "S"
-                
-                f_id = res.get("feed_id") or f_ids.get(res.get("bm_name")) or f_ids.get(row[3] if len(row) > 3 else "")
-                hash_stat = res.get("hash_status") or ("Yes" if res.get("hash_removed") else "No") if is_success else "N/A"
-                await r_q.put({'range': f"{o_col}{idx}:{s_col}{idx}", 'values': [[hash_stat, f_id, sdld, bm, fun]]})
+                wapi_start = h_map.get("wapi_start", "S" if h_map.get("r1") == "I" else "R")
+                wapi_end = h_map.get("wapi_end", "U" if h_map.get("r1") == "I" else "T")
+                await r_q.put({'range': f"{wapi_start}{idx}:{wapi_end}{idx}", 'values': [[sdld, bm, fun]]})
                 await r_q.put({'type': 'progress', 'is_success': is_success})
             except Exception as e:
                 err_domain = domain if 'domain' in locals() else (item.get('row', ['unknown', 'unknown'])[h_map.get('domain', 1)] if isinstance(item.get('row'), list) and len(item.get('row', [])) > h_map.get('domain', 1) else 'unknown')
                 pipeline_logger.error(f"TRACXN WORKER ERROR for {err_domain}: {e}")
                 if 'h_map' in locals() and 'idx' in locals():
-                    o_col, s_col = ("P", "T") if h_map.get("r1") == "J" else ("O", "S")
-                    await r_q.put({'range': f"{o_col}{idx}:{s_col}{idx}", 'values': [["N/A", "", "Err Tracxn", "Err Tracxn", "Err Tracxn"]]})
+                    wapi_start = h_map.get("wapi_start", "S" if h_map.get("r1") == "I" else "R")
+                    wapi_end = h_map.get("wapi_end", "U" if h_map.get("r1") == "I" else "T")
+                    await r_q.put({'range': f"{wapi_start}{idx}:{wapi_end}{idx}", 'values': [["Err Tracxn", "Err Tracxn", "Err Tracxn"]]})
                 await r_q.put({'type': 'progress', 'is_success': False})
             finally:
                 t_q.task_done()
