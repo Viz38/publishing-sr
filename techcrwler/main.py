@@ -457,6 +457,15 @@ async def find_all_links_locally_for_categories(
 
 # ----------------- TRACXN SCRAPER API ENDPOINTS -----------------------
 
+TRACXN_REQUEST_SOURCE = 'rajath.upadhya@tracxn.com | Python | SR-Publishing/TC | SR-Publishing-Engine'
+
+def get_tracxn_headers(token: str) -> Dict[str, str]:
+    return {
+        "accessToken": token,
+        "Content-Type": "application/json",
+        "X-Request-Source": TRACXN_REQUEST_SOURCE
+    }
+
 @backoff.on_exception(backoff.expo, Exception, max_tries=3, max_time=15)
 async def create_scraper_job(session: aiohttp.ClientSession, url: str, token: str) -> str:
     payload = {
@@ -467,7 +476,7 @@ async def create_scraper_job(session: aiohttp.ClientSession, url: str, token: st
         }
     }
     url_endpoint = f"{CONFIG['BASE_URL']}/utils/web-scraper/fetch/url/bu-sr"
-    headers = {"accessToken": token, "Content-Type": "application/json"}
+    headers = get_tracxn_headers(token)
     async with session.post(url_endpoint, json=payload, headers=headers, timeout=30) as response:
         response.raise_for_status()
         data = await response.json()
@@ -480,7 +489,7 @@ async def create_scraper_job(session: aiohttp.ClientSession, url: str, token: st
 async def get_job_status(session: aiohttp.ClientSession, job_id: str, token: str) -> Dict:
     url_endpoint = f"{CONFIG['BASE_URL']}/utils/web-scraper/fetch/url/track"
     payload = {"jobId": job_id}
-    headers = {"accessToken": token, "Content-Type": "application/json"}
+    headers = get_tracxn_headers(token)
     async with session.post(url_endpoint, json=payload, headers=headers, timeout=30) as response:
         response.raise_for_status()
         return await response.json()
@@ -489,7 +498,7 @@ async def get_job_status(session: aiohttp.ClientSession, job_id: str, token: str
 async def get_signed_url(session: aiohttp.ClientSession, s3_url: str, token: str) -> str:
     url_endpoint = f"{CONFIG['BASE_URL']}/utils/s3/signed-url"
     payload = {"url": s3_url}
-    headers = {"accessToken": token, "Content-Type": "application/json"}
+    headers = get_tracxn_headers(token)
     async with session.post(url_endpoint, json=payload, headers=headers, timeout=30) as response:
         response.raise_for_status()
         data = await response.json()

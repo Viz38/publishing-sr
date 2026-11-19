@@ -1,3 +1,16 @@
+## [2026-11-19] Standardize X-Request-Source Header for TechCrawler Tracxn API Calls
+Files changed:
+- techcrwler/main.py
+- Temp_Test/test_techcrwler_headers.py
+Reason:
+1. Missing Header Remediation:
+   - Previously, `techcrwler` made Tracxn API scraper requests without an `X-Request-Source` header.
+2. Standardized Header Format:
+   - Added `TRACXN_REQUEST_SOURCE` (`'rajath.upadhya@tracxn.com | Python | SR-Publishing/TC | SR-Publishing-Engine'`) and helper `get_tracxn_headers(token)`.
+   - Updated `create_scraper_job`, `get_job_status`, and `get_signed_url` in `techcrwler/main.py` to transmit this header on every Tracxn API call.
+Related tests:
+- Temp_Test/test_techcrwler_headers.py
+
 ## [2026-11-19] Repository Target & Branch Synchronization to main
 Files changed:
 - CHANGELOG.md
