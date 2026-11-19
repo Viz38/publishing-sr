@@ -58,7 +58,7 @@ CONFIG = {
 HEADERS = {
     "accessToken": settings.TYPEC_TRACXN_ACCESS_TOKEN,
     "Content-Type": "application/json",
-    "X-Request-Source": 'Type-C-Publishing'
+    "X-Request-Source": 'rajath.upadhya@tracxn.com | Python | SR-Publishing/TypeC | SR-Publishing-Engine'
 }
 
 # Configure logging

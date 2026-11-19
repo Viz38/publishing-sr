@@ -64,7 +64,7 @@ CONFIG = {
 HEADERS = {
     "accessToken": settings.TYPEB_TRACXN_ACCESS_TOKEN,
     "Content-Type": "application/json",
-    "X-Request-Source": 'Type-B-Publishing'
+    "X-Request-Source": 'rajath.upadhya@tracxn.com | Python | SR-Publishing/TypeB | SR-Publishing-Engine'
 }
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))

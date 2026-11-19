@@ -1,3 +1,15 @@
+## [2026-11-19] Repository Target & Branch Synchronization to main
+Files changed:
+- CHANGELOG.md
+Reason:
+1. Repository Verification:
+   - Verified remote origin target is set to https://github.com/Viz38/publishing-sr.git.
+2. Active Branch Switch & Sync:
+   - Switched active working branch from `techcrwler` to `main`.
+   - Verified `main` branch is fully synchronized and up-to-date with `origin/main` (latest commit `493a9b0`).
+Related tests:
+- Temp_Test/test_control_runner.py
+
 ## [2026-10-07] Incoming-Only Update Gating: Preserve Branches Without Remote Changes
 Files changed:
 - control.sh
