@@ -1,3 +1,45 @@
+## [2026-11-23] Autonomous Discovery-to-SR Ingestion Bridge (Dormant Pipeline)
+Files changed:
+- sr_common/discovery_bridge.py
+- sr_common/config.py
+- sr_common/clients.py
+- Temp_Test/test_discovery_bridge.py
+Reason:
+1. Autonomous Input Ingestion Bridge:
+   - Implemented `DiscoveryBridge` in `sr_common/discovery_bridge.py` connecting Discovery Engine's daily output (`1DCKvQcAQgTKGnWquYNOH6SlGgCun8yq8HD8Zj0AIJ-Y`) to Publishing SR.
+   - Categorizes domains dynamically based on Feed Curation Type from `Feed Owner Details`:
+     * Feed Curation Types starting with 'A' or 'E' -> Type A
+     * Feed Curation Types starting with 'B' -> Type B
+     * All others -> Type C
+2. Zero-Disruption Dormant Architecture:
+   - Configured `ENABLE_AUTONOMOUS_INGESTION=False` by default in `Settings`.
+   - In dormant mode, candidate domains are dry-run audited and safely staged to `Logs/staged_autonomous_domains.json` without writing to live Google Sheets.
+   - Designed to be 90% built and ready: zero code changes required to turn on later (flip `ENABLE_AUTONOMOUS_INGESTION=True` in `.env`).
+3. Multi-Credential GoogleSheetsClient:
+   - Refactored `GoogleSheetsClient.get_manager` in `sr_common/clients.py` to maintain a keyed dictionary of client managers by credentials file path, preventing singleton authorization collisions when accessing sheets with different service accounts.
+Related tests:
+- Temp_Test/test_discovery_bridge.py
+
+## [2026-11-23] Type C Migration to NVIDIA NIM (meta/muse-glimmer-30b)
+Files changed:
+- TypeC/main.py
+- sr_common/nim_client.py
+- sr_common/config.py
+- Temp_Test/test_typec_nim.py
+- Temp_Test/test_typec_pipeline_nim.py
+Reason:
+1. Switch Type C to NVIDIA NIM:
+   - Migrated Type C generation from Gemini to NVIDIA NIM API (`meta/muse-glimmer-30b`) at `https://integrate.api.nvidia.com/v1/chat/completions`.
+   - Configured `TYPEC_MAX_WORKERS=20` and dynamic key loading from sheet `1M2vlaOnfw8bH-sJQIwfM9p3tkkrpiWMr_f30heSr7Ys` tab `SS keys`.
+2. Asynchronous Token & Cooldown Management:
+   - Implemented `NIMKeyManager` supporting round-robin token leasing across 20 keys, automatic 60s cooldown penalties on HTTP 429 rate limits, and permanent deactivation for HTTP 401/403.
+   - Preserved standard `LLMResult` interface ensuring identical downstream parsing (`extract_descriptions`) and full Google Sheets traceability.
+3. Strict Architectural Boundary:
+   - Type A and Type B remain strictly on Gemini; only Type C is switched to NIM.
+Related tests:
+- Temp_Test/test_typec_nim.py
+- Temp_Test/test_typec_pipeline_nim.py
+
 ## [2026-11-19] Standardize X-Request-Source Header for TechCrawler Tracxn API Calls
 Files changed:
 - techcrwler/main.py

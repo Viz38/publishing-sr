@@ -29,6 +29,7 @@ from sr_common.utils import (
     update_manual_curation_date, is_tc_scraper_mode, col_to_index,
     reconcile_sheet_gaps, TrackingCacheManager, get_optimized_tcp_connector, trim_memory
 )
+from sr_common.nim_client import NIMKeyManager, call_nvidia_nim_api
 from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsClient
 from sr_common.fetcher import StealthFetcher, BrowserManager
 from sr_common.supabase_client import fetch_scraped_content
@@ -44,8 +45,12 @@ CONFIG = {
     "EXTRACTING_SHEET_NAME": "DB",
     "TRACKING_SHEET_ID": "1OvBOAXc_Y5aDLcK-BGCALFUZyJWLYolmFkr3tmo7mj4",
     "CREDENTIALS_FILE": os.path.join(os.path.dirname(os.path.abspath(__file__)), "TypeC.json"),
-    "MAX_WORKERS": _DYNAMIC_WORKERS,
-    "MAX_CONCURRENT_BROWSERS": _DYNAMIC_WORKERS,
+    "MAX_WORKERS": getattr(settings, "TYPEC_MAX_WORKERS", 20),
+    "MAX_CONCURRENT_BROWSERS": getattr(settings, "TYPEC_MAX_WORKERS", 20),
+    "NVIDIA_API_URL": settings.NVIDIA_API_URL,
+    "NVIDIA_MODEL": settings.NVIDIA_MODEL,
+    "NVIDIA_KEYS_SHEET_ID": settings.NVIDIA_KEYS_SHEET_ID,
+    "NVIDIA_KEYS_TAB_NAME": settings.NVIDIA_KEYS_TAB_NAME,
     "GEMINI_API_URL": settings.GEMINI_API_URL,
     "GEMINI_API_KEY": settings.TYPEC_GEMINI_API_KEY,
     "MAX_PROMPT_SIZE": settings.MAX_PROMPT_SIZE,
@@ -126,7 +131,7 @@ async def save_snapshot(domain: str, html: str, reason: str):
 fetcher = StealthFetcher()
 
 
-async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager) -> Dict:
+async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
@@ -188,11 +193,23 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ca
     if len(parts_p1) == 2:
         sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
         user_p1 = "Raw Content:\n" + body[:20000]
-        cache_id = await cache_manager.get_or_create(session, "prompt_0", sys_p1, ttl="86400s")
-        res_obj = await call_gemini_api(session, user_p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"], system_instruction=sys_p1, cached_content_name=cache_id, cache_manager=cache_manager, cache_key="prompt_0")
+        res_obj = await call_nvidia_nim_api(
+            session,
+            user_p1,
+            nim_key_manager,
+            model=CONFIG.get("NVIDIA_MODEL"),
+            endpoint=CONFIG.get("NVIDIA_API_URL"),
+            system_instruction=sys_p1
+        )
     else:
         p1 = prompts[0].replace("XX", body[:20000])
-        res_obj = await call_gemini_api(session, p1, gemini_limiter, api_key=CONFIG["GEMINI_API_KEY"])
+        res_obj = await call_nvidia_nim_api(
+            session,
+            p1,
+            nim_key_manager,
+            model=CONFIG.get("NVIDIA_MODEL"),
+            endpoint=CONFIG.get("NVIDIA_API_URL")
+        )
     
     llm_calls += 1
     res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
@@ -311,7 +328,14 @@ class TypeCPipeline:
         fo_sheet = await gc.open_by_key(self.config["FEED_OWNER_SHEET_ID"])
         f_ids = {r[0]: r[1] for r in (await (await fo_sheet.worksheet("Feed Owner Details")).get_values())}
 
-        cache_manager = TrackingCacheManager(settings.TYPEC_GEMINI_API_KEY, stats_filepath=os.path.join(LOGS_DIR, "cache_stats.json"))
+        nim_key_manager = NIMKeyManager(
+            sheet_id=self.config.get("NVIDIA_KEYS_SHEET_ID"),
+            tab_name=self.config.get("NVIDIA_KEYS_TAB_NAME", "SS keys"),
+            credentials_file=self.config["CREDENTIALS_FILE"]
+        )
+        await nim_key_manager.load_keys_from_sheet()
+        pipeline_logger.info(f"NIM: Initialized NIMKeyManager with {nim_key_manager.total_keys} keys from sheet")
+
         async with aiohttp.ClientSession(connector=get_optimized_tcp_connector()) as session:
             work_queue, result_queue, tracxn_queue = asyncio.Queue(), asyncio.Queue(), asyncio.Queue()
             for idx, row in data_rows:
@@ -326,13 +350,13 @@ class TypeCPipeline:
             ]
 
             if self.mode == "phase2":
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, nim_key_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                 await asyncio.gather(*tasks, return_exceptions=True)
             else:
                 browser_mgr = BrowserManager(max_navigations=150)
                 try:
                     pipeline_logger.info(f"Starting continuous streaming pipeline for {len(data_rows)} domains with {CONFIG['MAX_WORKERS']} workers")
-                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, cache_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, nim_key_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
                     await asyncio.gather(*tasks, return_exceptions=True)
                 finally:
                     await browser_mgr.close()
@@ -412,7 +436,7 @@ class TypeCPipeline:
                 pass
             await asyncio.sleep(1.0)
 
-    async def domain_worker(self, w_q, r_q, t_q, browser, session, prompts, f_ids, h_map, cache_manager):
+    async def domain_worker(self, w_q, r_q, t_q, browser, session, prompts, f_ids, h_map, nim_key_manager):
         monitor = SystemHealthMonitor()
         import random
         await asyncio.sleep(random.uniform(1.0, 5.0))
@@ -454,7 +478,7 @@ class TypeCPipeline:
                 else:
                     try:
                         res = await asyncio.wait_for(
-                            process_domain_stage1(browser, session, row, prompts, f_ids, h_map, cache_manager),
+                            process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager),
                             timeout=75.0
                         )
                     except asyncio.TimeoutError:

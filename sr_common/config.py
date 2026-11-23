@@ -68,6 +68,19 @@ class Settings(BaseSettings):
     SUPABASE_USER: str = ""
     SUPABASE_PASSWORD: str = ""
 
+    # NVIDIA NIM API (Type C)
+    NVIDIA_API_URL: str = "https://integrate.api.nvidia.com/v1/chat/completions"
+    NVIDIA_MODEL: str = "meta/muse-glimmer-30b"
+    NVIDIA_KEYS_SHEET_ID: str = ""
+    NVIDIA_KEYS_TAB_NAME: str = "SS keys"
+    TYPEC_MAX_WORKERS: int = 20
+
+    # Autonomous Discovery Bridge (Dormant Pipeline)
+    ENABLE_AUTONOMOUS_INGESTION: bool = False
+    DISCOVERY_DAILY_PROCESSING_SHEET_ID: str = "1DCKvQcAQgTKGnWquYNOH6SlGgCun8yq8HD8Zj0AIJ-Y"
+    DISCOVERY_DAILY_PROCESSING_TAB_NAME: str = "Sheet1"
+    DISCOVERY_CREDENTIALS_FILE: str = "Temp_Test/Discovery-Engine/Sheet1/creds.json"
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Manually sync from environ if Pydantic missed them

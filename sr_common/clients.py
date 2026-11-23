@@ -1,3 +1,4 @@
+import os
 import asyncio
 import gspread_asyncio
 from oauth2client.service_account import ServiceAccountCredentials
@@ -148,15 +149,16 @@ class MultiTierRateLimiter:
 
 class GoogleSheetsClient:
     _instance = None
-    _manager = None
+    _managers = {}
 
     @classmethod
     def get_manager(cls, credentials_file: str):
-        if cls._manager is None:
+        abs_path = os.path.abspath(credentials_file)
+        if abs_path not in cls._managers:
             scope = [
                 'https://spreadsheets.google.com/feeds',
                 'https://www.googleapis.com/auth/drive'
             ]
             creds = ServiceAccountCredentials.from_json_keyfile_name(credentials_file, scope)
-            cls._manager = gspread_asyncio.AsyncioGspreadClientManager(lambda: creds)
-        return cls._manager
+            cls._managers[abs_path] = gspread_asyncio.AsyncioGspreadClientManager(lambda: creds)
+        return cls._managers[abs_path]
