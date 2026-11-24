@@ -657,27 +657,43 @@ async def clean_html(html: str) -> str:
 def extract_descriptions(text: str) -> Tuple[str, str]:
     if not text or len(text) < 10:
         return "", ""
-    
-    # Check for AI refusal or insufficient data signals
-    text_lower = text.lower()
-    refusal_signals = ["i cannot", "not available", "no information", "insufficient data", "cannot provide", "don't have access", "does not contain","content insufficient", "content insufficient for generating sd or ld"]
-    if any(sig in text_lower for sig in refusal_signals):
-        return "NO_DATA", "NO_DATA"
-    
-    # Check if LLM explicitly says it's parked
-    if "parked" in text_lower and ("domain" in text_lower or "site" in text_lower or "page" in text_lower):
-        return "PARKED_LLM", "PARKED_LLM"
 
+    # Attempt to extract valid SD and LD first
     json_sd = re.search(r'["\']\*?\*?(?:Short Description|SD)\*?\*?["\']:\s*["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
     json_ld = re.search(r'["\']\*?\*?(?:Long Description|LD)\*?\*?["\']:\s*["\'](.*?)["\']', text, re.IGNORECASE | re.DOTALL)
     if json_sd and json_ld:
         sd, ld = json_sd.group(1).strip(), json_ld.group(1).strip()
     else:
-        sd_m = re.search(r'\*?\*?(?:Short Description|SD)\*?\*?:\s*(.*?)(?=\n\*?\*?(?:Long Description|LD)\*?\*?:|\n\n|$)', text, re.IGNORECASE | re.DOTALL)
-        ld_m = re.search(r'\*?\*?(?:Long Description|LD)\*?\*?:\s*(.*)', text, re.IGNORECASE | re.DOTALL)
-        sd, ld = (sd_m.group(1).strip() if sd_m else ""), (ld_m.group(1).strip() if ld_m else "")
+        sd_matches = re.findall(r'\*?\*?(?:Short Description|SD)\*?\*?:\*?\*?\s*(.*?)(?=\n\*?\*?(?:Long Description|LD)\*?\*?:|\n\n|\Z)', text, re.IGNORECASE | re.DOTALL)
+        ld_matches = re.findall(r'\*?\*?(?:Long Description|LD)\*?\*?:\*?\*?\s*(.*?)(?=\n\*?\*?(?:Short Description|SD)\*?\*?:|\Z)', text, re.IGNORECASE | re.DOTALL)
         
-    return " ".join(sd.split()).rstrip('.'), " ".join(ld.split())
+        # Filter out prompt template placeholders like "[Your 10-word line", "<exactly 10 words>", or the prompt example
+        valid_sds = [s.strip() for s in sd_matches if s.strip() and not (s.strip().startswith(('<', '[')) or any(ph in s.lower() for ph in ["[your", "<exactly", "<10-word", "do not end with a period", "high-performance vl3", "example output"]))]
+        valid_lds = [l.strip() for l in ld_matches if l.strip() and not (l.strip().startswith(('<', '[')) or any(ph in l.lower() for ph in ["[the exact same", "<maximum", "<same", "word for word", "high-performance vl3", "example output"]))]
+        
+        sd = valid_sds[-1] if valid_sds else ""
+        ld = valid_lds[-1] if valid_lds else ""
+        
+    sd = " ".join(sd.split()).rstrip('.')
+    ld = " ".join(ld.split())
+    
+    if sd and ld:
+        return sd, ld
+
+    # Check for explicit refusal or insufficient data signals only when extraction failed
+    text_lower = text.strip().lower()
+    if "content insufficient for generating sd or ld" in text_lower[-500:]:
+        return "NO_DATA", "NO_DATA"
+    
+    refusal_signals = ["i cannot", "not available", "no information", "insufficient data", "cannot provide", "don't have access", "does not contain"]
+    if any(sig in text_lower[-300:] for sig in refusal_signals):
+        return "NO_DATA", "NO_DATA"
+    
+    # Check if LLM explicitly says it's parked in final portion
+    if "parked" in text_lower[-500:] and ("domain" in text_lower[-500:] or "site" in text_lower[-500:] or "page" in text_lower[-500:]):
+        return "PARKED_LLM", "PARKED_LLM"
+        
+    return sd, ld
 
 def col_to_index(col: Union[str, int]) -> int:
     """Converts Excel-style column string ('A', 'B', 'S', 'X', 'AB', 'AC') to 0-based index."""

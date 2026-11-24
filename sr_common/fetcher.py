@@ -1,6 +1,15 @@
+import sys
+if sys.platform == "darwin":
+    try:
+        import ctypes
+        ctypes.cdll.LoadLibrary('/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation')
+    except Exception:
+        pass
+
 import asyncio
 import inspect
 import logging
+import re
 from typing import Optional, Tuple, Any, Dict
 from curl_cffi.requests import AsyncSession
 from scrapling import Fetcher, StealthyFetcher
@@ -198,6 +207,13 @@ class StealthFetcher:
                         if self._is_valid(content):
                             logger.info(f"TIER 0 SUCCESS: {attempt_url} -> {resp.url}")
                             return content, str(resp.url), "Success"
+                        
+                        # Check for iframe wrapper before abandoning Tier 0
+                        iframe_content, iframe_url = await self._check_iframe_wrapper(s, str(resp.url), content)
+                        if iframe_content and self._is_valid(iframe_content):
+                            logger.info(f"TIER 0 IFRAME SUCCESS: {attempt_url} -> {iframe_url}")
+                            return iframe_content, str(iframe_url), "Success"
+
                         logger.warning(f"TIER 0 FAIL: {attempt_url} | Captcha/Low Content")
                     elif resp.status_code in (403, 401, 503):
                         tier0_saw_403 = True
@@ -305,7 +321,40 @@ class StealthFetcher:
         lower_content = content.lower()
         if "sgcaptcha" in lower_content or "<title>just a moment...</title>" in lower_content:
             return False
-        return len(content) > min_len
+        if len(content) <= min_len:
+            return False
+        # SPA / Client-side JS check: If HTML is large but body text is virtually empty, fall through to browser!
+        body_text = re.sub(r'<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>', '', content, flags=re.I)
+        body_text = re.sub(r'<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>', '', body_text, flags=re.I)
+        body_text = re.sub(r'<[^>]+>', ' ', body_text)
+        clean_text = " ".join(body_text.split())
+        if len(clean_text) < 150:
+            logger.info(f"TIER 0 SPA DETECTED: HTML is {len(content)} chars but clean text is only {len(clean_text)} chars. Falling back to browser...")
+            return False
+        return True
+
+    async def _check_iframe_wrapper(self, session: AsyncSession, base_url: str, html: str) -> Tuple[Optional[str], Optional[str]]:
+        if not html:
+            return None, None
+        try:
+            from bs4 import BeautifulSoup
+            soup = BeautifulSoup(html, 'html.parser')
+            frame = soup.find(['iframe', 'frame'], src=True)
+            if frame and frame.get('src'):
+                src = frame['src'].strip()
+                if not src.startswith(('javascript:', 'data:', 'about:')) and not any(ad in src.lower() for ad in ['googletag', 'doubleclick', 'googleads', 'youtube.com/embed']):
+                    import urllib.parse
+                    target_url = urllib.parse.urljoin(base_url, src)
+                    parsed_base = urllib.parse.urlparse(base_url)
+                    parsed_target = urllib.parse.urlparse(target_url)
+                    if not parsed_target.netloc or parsed_target.netloc.replace('www.', '') == parsed_base.netloc.replace('www.', ''):
+                        logger.info(f"TIER 0 IFRAME DETECTED: Following iframe src {src} -> {target_url}")
+                        resp = await session.get(target_url, headers=self.headers, timeout=self.timeout, verify=False)
+                        if resp.status_code == 200:
+                            return resp.text, str(resp.url)
+        except Exception as e:
+            logger.warning(f"Error checking iframe wrapper: {e}")
+        return None, None
 
     async def _block_media(self, route):
         if route.request.resource_type in ["image", "media", "font", "object", "texttrack", "manifest", "other"]:

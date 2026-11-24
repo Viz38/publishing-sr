@@ -1,3 +1,164 @@
+## [2026-11-24] Enforce Invariant: Max 2 In-Flight Requests Per NIM Key with Guaranteed Lease Release
+Files changed:
+- sr_common/nim_client.py
+Reason:
+1. Enforce Max 2 In-Flight Requests Per Key:
+   - Added `_active_counts: Dict[str, int]` and `asyncio.Condition` to `NIMKeyManager` to track real-time concurrent requests per key.
+   - Updated `acquire_key(max_in_flight=2)` to guarantee that no NIM key ever executes more than 2 in-flight requests simultaneously.
+   - Load-balanced key selection to prioritize completely idle keys (0 active) before assigning second requests (1 active).
+   - If all active keys are at capacity (2 in-flight) or penalized, waiting workers safely wait until a slot frees up.
+2. Guaranteed Lease Release:
+   - Added `release_key(key)` to `NIMKeyManager`.
+   - Wrapped `call_nvidia_nim_api` attempt execution in `try ... finally: await key_manager.release_key(api_key)` ensuring that every leased key is cleanly released on success (200), rate limit (429), auth error (401/403), timeout, or exception without leaking concurrency slots.
+Related tests:
+- Temp_Test/test_nim_key_concurrency.py
+- Temp_Test/test_comprehensive_key_concurrency.py
+- Temp_Test/test_call_api_release.py
+
+## [2026-11-24] Dynamic NIM Concurrency (Active Keys * 2) & Worker Auto-Scaling
+Files changed:
+- TypeC/main.py
+Reason:
+1. Dynamic NIM Semaphore Limit:
+   - Updated `TypeC/main.py` to calculate `nim_semaphore` concurrency dynamically based on the active key pool: `max(1, nim_key_manager.total_keys * 2)`.
+   - Allows up to 40 parallel NIM inference requests when 20 keys are loaded, eliminating queue bottlenecks.
+   - Retained support for manual override via `NIM_MAX_CONCURRENCY` in `.env` if explicit throttling is ever required.
+2. Domain Worker Auto-Scaling:
+   - Dynamically scaled domain worker creation in `TypeC/main.py` (`worker_count = max(CONFIG["MAX_WORKERS"], concurrency_limit)`) to ensure the pipeline spawns enough workers to feed all available parallel NIM slots.
+Related tests:
+- TypeC/main.py
+
+## [2026-11-24] Align Type C NIM Payload with System/User Message Separation & 2500 Max Tokens
+Files changed:
+- TypeC/main.py
+- TypeC/prompt_typec.py
+- sr_common/nim_client.py
+Reason:
+1. Clean System vs. User Message Separation:
+   - Passed `PROMPT_TYPE_C_TEMPLATE` as `system_instruction` (placed under `role: "system"`) and passed domain extract as `user_p1` (`role: "user"`: `Domain: {domain}\n\nExtract:\n{body[:4000]}`).
+   - Prevents `meta/muse-glimmer-30b` from treating prompt rules as user input to deliberate over, reducing internal reasoning tokens and speeding up inference by 30-50s.
+2. Increased Candidate Token Headroom:
+   - Raised NIM `max_tokens` from 1,850 to 2,500 in `TypeC/main.py` and updated default in `sr_common/nim_client.py`.
+   - Guaranteed full completion of reasoning and flawless 5-sentence Long Description generation without premature token cutoffs.
+3. Clean Prompt Ending:
+   - Removed trailing "Below is the domain..." text from `TypeC/prompt_typec.py` so the system prompt closes cleanly at `</reasoning_guideline>`.
+Related tests:
+- Temp_Test/test_system_user_split.py
+
+## [2026-11-24] Fix Reasoning Bounding & Prevent Prompt/Thinking Leakage in Column H
+Files changed:
+- TypeC/prompt_typec.py
+- TypeC/main.py
+- sr_common/nim_client.py
+Reason:
+1. Reasoning Bounding Directive for `meta/muse-glimmer-30b`:
+   - Added `<reasoning_guideline>` instructing the model to keep internal reasoning brief (under 250 words) and proceed directly to emitting final `SD:` and `LD:` output.
+   - Raised NIM `max_tokens` from 1,650 to 1,850 in `TypeC/main.py`, providing sufficient headroom for complete generation.
+   - Verified that generation finishes in ~150s with `finish_reason: stop` producing exact 10-word SD and 5-sentence LD.
+2. Prevention of Prompt and Thinking Leakage in Column H:
+   - In `sr_common/nim_client.py`, removed unconditional fallback that returned raw `reasoning_content` when `content` was empty/cut off.
+   - Added parsing check: if `content` is empty, it attempts to extract valid SD/LD from reasoning or returns a clean `Error: Incomplete LLM reasoning (token budget reached before output)` without dumping the raw prompt into Column H.
+   - In `TypeC/main.py`, sanitized `clean_res` to filter out `<system_role>` and `<output_contract>` prompt preamble before writing failure reasons to Column H.
+Related tests:
+- Temp_Test/test_prompt_optim.py
+- Temp_Test/test_ofl.py
+- Temp_Test/debug_nim_response.py
+
+## [2026-11-24] Hardcode Upgraded Type C Structured Prompt in Code (Test Mode)
+Files changed:
+- TypeC/prompt_typec.py
+- TypeC/main.py
+Reason:
+1. Hardcoded Upgraded Type C Prompt:
+   - Added `TypeC/prompt_typec.py` containing the new structured XML-tagged prompt (`<system_role>`, `<abstention_gate>`, `<sd_rules>`, `<ld_rules>`, `<prose_and_readability_rules>`, `<proper_noun_and_ecosystem_policy>`, `<banned_vocabulary>`, `<few_shot_examples>`, `<output_contract>`).
+   - Integrated `PROMPT_TYPE_C_TEMPLATE` into `process_domain_stage1()` in `TypeC/main.py`.
+   - Kept the reference Google Sheet `Prompts` tab untouched per user instruction.
+2. Token Allocation Adjustments:
+   - Set candidate token limit to 1,650 (`max_tokens=1650`) to accommodate complete generation of the 4-6 sentence Long Description alongside internal reasoning, comfortably completing within the 300s socket window.
+Related tests:
+- Temp_Test/test_new_user_prompt.py
+- Temp_Test/test_extraction_sentence.py
+
+## [2026-11-24] Resolve All-Domain LLM Timeout & Queue Starvation for meta/muse-glimmer-30b
+Files changed:
+- sr_common/nim_client.py
+- TypeC/main.py
+- sr_common/utils.py
+Reason:
+1. Resolved Queue Starvation and Domain Timeout:
+   - Fixed architectural bug in `TypeC/main.py` where domain worker global timeout (`timeout=360.0`) wrapped both scraping, waiting in the 4-slot `nim_semaphore` queue, and NIM generation. Queued domains waiting behind active semaphore slots were aborted with `LLM failed - timeout` before ever reaching the API.
+   - Decoupled domain worker timeout to 1200.0s and placed a dedicated `asyncio.wait_for(..., timeout=310.0)` strictly around the NIM API call once semaphore slot is acquired.
+2. NIM Client Socket Read Window & Retry Bounding:
+   - Raised `sock_read` from 240.0s to 300.0s and `total` to 330.0s in `sr_common/nim_client.py`, giving `meta/muse-glimmer-30b` full breathing room up to NVIDIA's 300s gateway cutoff.
+   - Reduced `max_retries` from 4 to 1 for long reasoning calls to prevent deadlocks and semaphore slot holding.
+   - Bounded input body slice to `body[:3500]` (cutting prompt tokens from ~4,500 to ~1,600), reducing time-to-first-token and stabilizing inference to ~140–180 seconds.
+3. Fixed False Positive "NO_DATA" in Description Extraction:
+   - Fixed critical bug in `extract_descriptions()` in `sr_common/utils.py` where checking `refusal_signals` ("content insufficient for generating sd or ld") against the entire text was triggered by `meta/muse-glimmer-30b` echoing prompt rules in its reasoning output, falsely returning `NO_DATA` ("Low content") on fully scraped sites.
+   - Extracted valid SD and LD first before evaluating fallback refusal signals.
+4. Exact Raw LLM Response in Column H on Extraction Failure:
+   - Formatted Column H error as `LLM failed - missing descriptions: <clean_res[:950]>` so operators can inspect the exact model response directly on the Google Sheet.
+Related tests:
+- Temp_Test/test_1600_tokens.py
+- Temp_Test/test_no_deliberation.py
+- Temp_Test/test_end_to_end_fix.py
+
+## [2026-11-24] Exact LLM Response Logging in Col H, False Scraper Failure Prevention & NIM Token Allocation
+Files changed:
+- TypeC/main.py
+- sr_common/fetcher.py
+- sr_common/utils.py
+- sr_common/nim_client.py
+Reason:
+1. Exact Raw LLM Response Written to Column H on Failure:
+   - Updated `process_domain_stage1()` in `TypeC/main.py` to capture raw LLM text when `extract_descriptions()` fails to find valid SD/LD: `reason = f"LLM failed - missing descriptions: {clean_res[:950]}"`.
+   - Updated result queue writer in `TypeC/main.py` (`Col H`) to write up to 1,000 characters so operators can inspect the exact LLM reasoning output directly on Google Sheets.
+2. Prevention of False "Unable To Scrap" on Working Websites:
+   - Root Cause A (Timeout Masking): Eliminated catch-all overwriting of stage 1 timeouts into "Unable To Scrap". If domain processing exceeds the stage 1 budget during LLM inference, it now reports `LLM failed - timeout`.
+   - Root Cause B (SPA / Client-Side JS): Added clean body text length check (`len(clean_text) < 150`) in `sr_common/fetcher.py` `_is_valid()`. Websites serving empty SPA shells (e.g., Angular `<app-root>` on `beu-bih.ac.in`) now fail fast in Tier 0 and fall through to Camoufox browser rendering (yielding 5,222 characters of clean text).
+   - Root Cause C (Iframe Wrappers): Added `_check_iframe_wrapper()` to `StealthFetcher` to automatically inspect `<iframe src="...">` and follow same-domain / relative target URLs in Tier 0. Institutional sites like `igmcshimla.edu.in` now succeed in 5 seconds (yielding 6,735 characters) without browser overhead.
+3. Model Token Capacity & Reasoning Adaptation for `meta/muse-glimmer-30b`:
+   - Raised NIM candidate token allocation (`max_tokens`) from 400 to 2,000 in `TypeC/main.py` to provide adequate token budget for the model's internal reasoning steps and complete description output.
+   - Refined `extract_descriptions()` in `sr_common/utils.py` to ignore echoed prompt template placeholders (`[Your 10-word line...]`, `<exactly 10 words>`) and example outputs (`high-performance vl3`), ensuring it matches the actual generated descriptions.
+Related tests:
+- Temp_Test/test_extract.py
+- Temp_Test/test_stealth_fetcher_beu.py
+- Temp_Test/test_stealth_fetcher_igmc.py
+- Temp_Test/test_token_limit.py
+
+## [2026-11-23] Type C NIM Timeout Calibration, Concurrency Limiting & Sheet Progress Fix
+Files changed:
+- sr_common/nim_client.py
+- sr_common/fetcher.py
+- TypeC/main.py
+- TypeC/api.py
+Reason:
+1. Empirically Calibrated NIM Timeout Budget:
+   - Measured actual `meta/muse-glimmer-30b` inference latency on NVIDIA NIM (empirically 191.57 seconds / ~3.2 minutes).
+   - Raised NIM client socket read timeout to 240s and total timeout to 270s (`total=270.0, sock_connect=30.0, sock_read=240.0`), allowing full response generation while staying under NVIDIA's 300s (5-minute) hard HTTP 504 Gateway Timeout limit.
+   - Expanded pipeline Stage 1 domain worker budget (`asyncio.wait_for`) from 240s to 360s.
+2. NIM Concurrency Throttling (`NIM_MAX_CONCURRENCY`):
+   - Added `asyncio.Semaphore(4)` around NIM inference in `TypeC/main.py` to prevent 20 concurrent scraping workers from hammering NVIDIA simultaneously and queue-starving requests past the 300s gateway cutoff.
+   - Trimmed scraped content injection to `body[:12000]` to prevent oversized payloads from triggering 504 gateway timeouts.
+3. Live Google Sheets Progress UI Fix:
+   - Bound all `PROGRESS_FILE` and `STOP_FILE` operations in `TypeC/main.py` and `TypeC/api.py` to absolute paths (`TypeC/.progress.json`), resolving path discrepancy where the UI was stuck displaying `0 / 0 rows`.
+   - Replaced unbounded sheet downloads of all 18,738 rows with bounded range calculation (`ws.col_values(2)` and `A{start}:AB{end}`), cutting startup grid fetch time from 30+ seconds to <4 seconds.
+4. Darwin macOS CoreFoundation Symbol Pre-load:
+   - Added pre-loading of `CoreFoundation.framework/CoreFoundation` via ctypes in `sr_common/fetcher.py` to prevent `_CFRelease` symbol resolution failure during `curl_cffi` import on macOS with Python 3.13.
+Related tests:
+- Temp_Test/test_single_nim_run.py
+- Temp_Test/confirm_nim_latency.py
+
+## [2026-11-23] Service Manager Hardening in control.sh
+Files changed:
+- control.sh
+- Temp_Test/test_control_runner.py
+Reason:
+1. Clean Process & Screen Session Termination:
+   - Silenced screen quit outputs to avoid noisy "No screen session found." messages when sessions are already closed.
+   - Guarded port PID killing with empty checks to prevent `kill` usage errors on unused ports.
+Related tests:
+- Temp_Test/test_control_runner.py
+
 ## [2026-11-23] Autonomous Discovery-to-SR Ingestion Bridge (Dormant Pipeline)
 Files changed:
 - sr_common/discovery_bridge.py

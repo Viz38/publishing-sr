@@ -327,7 +327,7 @@ stop_all() {
             launchctl unload "$HOME/Library/LaunchAgents/$n.plist" 2>/dev/null
             rm "$HOME/Library/LaunchAgents/$n.plist" 2>/dev/null
         done
-        for n in "${NAMES[@]}"; do screen -X -S "${n}_Engine" quit 2>/dev/null; done
+        for n in "${NAMES[@]}"; do screen -X -S "${n}_Engine" quit &>/dev/null; done
     else
         for n in "${NAMES[@]}"; do
             sudo systemctl disable --now $n 2>/dev/null
@@ -353,7 +353,10 @@ stop_all() {
     pkill -f "firefox" 2>/dev/null
     pkill -f "playwright" 2>/dev/null
     
-    for p in "${PORTS[@]}"; do lsof -ti :$p | xargs kill -9 2>/dev/null; done
+    for p in "${PORTS[@]}"; do
+        local pids=$(lsof -ti :$p 2>/dev/null)
+        [ -n "$pids" ] && echo "$pids" | xargs kill -9 2>/dev/null
+    done
     echo -e "${GREEN}Cleanup complete.${NC}"
 }
 

@@ -34,6 +34,7 @@ from sr_common.clients import RateLimiter, MultiTierRateLimiter, GoogleSheetsCli
 from sr_common.fetcher import StealthFetcher, BrowserManager
 from sr_common.supabase_client import fetch_scraped_content
 from sr_common.stealth import get_browser_profile
+from TypeC.prompt_typec import PROMPT_TYPE_C_TEMPLATE
 
 _DYNAMIC_WORKERS = get_dynamic_max_workers()
 
@@ -67,7 +68,10 @@ HEADERS = {
 }
 
 # Configure logging
-LOGS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Logs')
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOGS_DIR = os.path.join(BASE_DIR, 'Logs')
+PROGRESS_FILE = os.path.join(BASE_DIR, ".progress.json")
+STOP_FILE = os.path.join(BASE_DIR, ".stop_requested")
 os.makedirs(LOGS_DIR, exist_ok=True)
 
 def setup_logger(name, log_file, level=logging.INFO):
@@ -131,7 +135,7 @@ async def save_snapshot(domain: str, html: str, reason: str):
 fetcher = StealthFetcher()
 
 
-async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager) -> Dict:
+async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager, nim_semaphore=None) -> Dict:
     domain = row[h_map["domain"]]
     pipeline_logger.info(f"PROCESS START: {domain}")
     
@@ -189,27 +193,42 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ni
     llm_calls = 0
     llm_rows = 1
     
-    parts_p1 = prompts[0].split("XX")
-    if len(parts_p1) == 2:
-        sys_p1 = parts_p1[0].strip() + "\n\n[DATA PROVIDED BY USER BELOW]\n\n" + parts_p1[1].strip()
-        user_p1 = "Raw Content:\n" + body[:20000]
-        res_obj = await call_nvidia_nim_api(
-            session,
-            user_p1,
-            nim_key_manager,
-            model=CONFIG.get("NVIDIA_MODEL"),
-            endpoint=CONFIG.get("NVIDIA_API_URL"),
-            system_instruction=sys_p1
-        )
-    else:
-        p1 = prompts[0].replace("XX", body[:20000])
-        res_obj = await call_nvidia_nim_api(
-            session,
-            p1,
-            nim_key_manager,
-            model=CONFIG.get("NVIDIA_MODEL"),
-            endpoint=CONFIG.get("NVIDIA_API_URL")
-        )
+    user_p1 = f"Domain: {domain}\n\nExtract:\n{body[:4000]}"
+    try:
+        if nim_semaphore:
+            async with nim_semaphore:
+                res_obj = await asyncio.wait_for(
+                    call_nvidia_nim_api(
+                        session,
+                        user_p1,
+                        nim_key_manager,
+                        model=CONFIG.get("NVIDIA_MODEL"),
+                        endpoint=CONFIG.get("NVIDIA_API_URL"),
+                        system_instruction=PROMPT_TYPE_C_TEMPLATE,
+                        temperature=0.0,
+                        max_tokens=2500,
+                        max_retries=1
+                    ),
+                    timeout=310.0
+                )
+        else:
+            res_obj = await asyncio.wait_for(
+                call_nvidia_nim_api(
+                    session,
+                    user_p1,
+                    nim_key_manager,
+                    model=CONFIG.get("NVIDIA_MODEL"),
+                    endpoint=CONFIG.get("NVIDIA_API_URL"),
+                    system_instruction=PROMPT_TYPE_C_TEMPLATE,
+                    temperature=0.0,
+                    max_tokens=2500,
+                    max_retries=1
+                ),
+                timeout=310.0
+            )
+    except asyncio.TimeoutError:
+        pipeline_logger.error(f"NIM INFERENCE TIMEOUT: {domain} exceeded 310s API budget")
+        return {"type": "error", "reason": "LLM failed - timeout", "scraper_used": scraper_used}
     
     llm_calls += 1
     res, in_p, out_p = res_obj.text, res_obj.prompt_tokens, res_obj.candidate_tokens
@@ -227,8 +246,12 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ni
         pipeline_logger.warning(f"PROCESS FAILED: {domain} | Reason: Parked (AI reported PARKED_LLM)")
         return {"type": "error", "reason": "Parked", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
     if not sd or not ld:
-        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: LLM failed to generate descriptions")
-        return {"type": "error", "reason": "LLM failed - missing descriptions", "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
+        clean_res = " ".join(str(res).split()) if res else ""
+        if clean_res.startswith("<system_role>") or "<output_contract>" in clean_res:
+            clean_res = "Prompt echo detected / incomplete output"
+        reason = f"LLM failed - missing descriptions: {clean_res[:200]}" if clean_res else "LLM failed - missing descriptions: <EMPTY RESPONSE>"
+        pipeline_logger.error(f"PROCESS FAILED: {domain} | Reason: {reason[:200]}")
+        return {"type": "error", "reason": reason, "raw_response": res, "tokens": tokens, "llm_calls": llm_calls, "llm_rows": llm_rows, "scraper_used": scraper_used}
 
     pipeline_logger.info(f"PROCESS SUCCESS: {domain}")
     f_id = f_ids.get(row[h_map["funnel_name"]].split(" : ")[1] if " : " in row[h_map["funnel_name"]] else row[h_map["funnel_name"]], "")
@@ -250,10 +273,10 @@ class TypeCPipeline:
         self.stop_requested = False
 
     async def _stop_monitor(self, w_q=None):
-        """Monitors for graceful stop request via SIGTERM or .stop_requested file.
+        """Monitors for graceful stop request via SIGTERM or STOP_FILE.
         When stop is requested, sets stop_requested=True so workers complete current
         work and safely exit without discarding queued items."""
-        while not (self.stop_requested or os.path.exists(".stop_requested")):
+        while not (self.stop_requested or os.path.exists(STOP_FILE)):
             await asyncio.sleep(0.5)
         self.stop_requested = True
         pipeline_logger.warning("GRACEFUL STOP TRIGGERED: Halting domain workers (preserving work_queue)...")
@@ -280,8 +303,13 @@ class TypeCPipeline:
                 sheet = await gc.open_by_key(self.config["SHEET_ID"])
                 ws = await sheet.worksheet(self.config["EXTRACTING_SHEET_NAME"])
                 
-                pipeline_logger.info(f"Fetching data from Row {self.start_row}...")
-                all_rows = await ws.get_values(f"A{self.start_row}:AB")
+                pipeline_logger.info("Determining active data range in worksheet...")
+                col_b = await ws.col_values(2)
+                last_populated_row = max(len(col_b), self.start_row)
+                fetch_end = min(ws.row_count, last_populated_row + 50)
+
+                pipeline_logger.info(f"Fetching data from Row {self.start_row} to {fetch_end}...")
+                all_rows = await ws.get_values(f"A{self.start_row}:AB{fetch_end}")
                 data_rows = []
                 for i, r in enumerate(all_rows):
                     if len(r) < 2: continue
@@ -309,12 +337,6 @@ class TypeCPipeline:
             "sd": 8, "ld": 9, "feed_id": 10, "funnel_name": 3, "r1": "H",
             "scraper_col": "S", "scraper_idx": 18
         }
-        
-        all_rows = await ws.get_values()
-        data_rows = []
-        for i, r in enumerate(all_rows[self.start_row-1:], start=self.start_row):
-            if len(r) > 1 and r[1].strip():
-                data_rows.append((i, r))
         
         if data_rows:
             max_idx = max(idx for idx, _ in data_rows)
@@ -349,14 +371,20 @@ class TypeCPipeline:
                 for _ in range(5)
             ]
 
+            dynamic_nim_limit = max(1, nim_key_manager.total_keys * 2) if nim_key_manager.total_keys else 4
+            env_override = os.getenv("NIM_MAX_CONCURRENCY")
+            concurrency_limit = int(env_override) if (env_override and env_override.isdigit()) else dynamic_nim_limit
+            nim_semaphore = asyncio.Semaphore(concurrency_limit)
+            worker_count = max(CONFIG["MAX_WORKERS"], concurrency_limit)
+
             if self.mode == "phase2":
-                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, nim_key_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, None, session, prompts, f_ids, h_map, nim_key_manager, nim_semaphore)) for _ in range(worker_count)]
                 await asyncio.gather(*tasks, return_exceptions=True)
             else:
                 browser_mgr = BrowserManager(max_navigations=150)
                 try:
-                    pipeline_logger.info(f"Starting continuous streaming pipeline for {len(data_rows)} domains with {CONFIG['MAX_WORKERS']} workers")
-                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, nim_key_manager)) for _ in range(CONFIG["MAX_WORKERS"])]
+                    pipeline_logger.info(f"Starting continuous streaming pipeline for {len(data_rows)} domains with {worker_count} workers (NIM concurrency: {concurrency_limit} [{nim_key_manager.total_keys} keys x 2])")
+                    tasks = [asyncio.create_task(self.domain_worker(work_queue, result_queue, tracxn_queue, browser_mgr, session, prompts, f_ids, h_map, nim_key_manager, nim_semaphore)) for _ in range(worker_count)]
                     await asyncio.gather(*tasks, return_exceptions=True)
                 finally:
                     await browser_mgr.close()
@@ -373,7 +401,7 @@ class TypeCPipeline:
             stop_monitor_task.cancel()
 
             # End-of-run Gap Reconciliation & Recovery Pass
-            if not self.stop_requested and not os.path.exists(".stop_requested"):
+            if not self.stop_requested and not os.path.exists(STOP_FILE):
                 pipeline_logger.info("AUDIT: Verifying sheet completion and checking for gaps...")
                 try:
                     reconciled, still_missing = await reconcile_sheet_gaps(
@@ -403,9 +431,9 @@ class TypeCPipeline:
                 except Exception as audit_err:
                     pipeline_logger.error(f"AUDIT ERROR: {audit_err}")
 
-            if os.path.exists(".stop_requested"):
+            if os.path.exists(STOP_FILE):
                 try:
-                    os.remove(".stop_requested")
+                    os.remove(STOP_FILE)
                 except Exception:
                     pass
 
@@ -415,9 +443,9 @@ class TypeCPipeline:
             try:
                 pause_info = tracxn_limiter.get_pause_status()
                 current_data = {"current": 0, "total": 0, "success": 0, "fail": 0}
-                if os.path.exists(".progress.json"):
+                if os.path.exists(PROGRESS_FILE):
                     try:
-                        with open(".progress.json", "r") as f:
+                        with open(PROGRESS_FILE, "r") as f:
                             current_data = json.load(f)
                     except Exception:
                         pass
@@ -426,22 +454,22 @@ class TypeCPipeline:
                 current_data["rate_limit_paused"] = pause_info["paused"]
                 current_data["sleep_remaining_sec"] = pause_info["remaining"]
                 current_data["rate_limit_message"] = pause_info["message"]
-                current_data["is_stopping"] = self.stop_requested or os.path.exists(".stop_requested")
+                current_data["is_stopping"] = self.stop_requested or os.path.exists(STOP_FILE)
                 
-                tmp_file = f".progress.json.tmp.{os.getpid()}"
+                tmp_file = f"{PROGRESS_FILE}.tmp.{os.getpid()}"
                 with open(tmp_file, "w") as f:
                     json.dump(current_data, f)
-                os.replace(tmp_file, ".progress.json")
+                os.replace(tmp_file, PROGRESS_FILE)
             except Exception:
                 pass
             await asyncio.sleep(1.0)
 
-    async def domain_worker(self, w_q, r_q, t_q, browser, session, prompts, f_ids, h_map, nim_key_manager):
+    async def domain_worker(self, w_q, r_q, t_q, browser, session, prompts, f_ids, h_map, nim_key_manager, nim_semaphore=None):
         monitor = SystemHealthMonitor()
         import random
         await asyncio.sleep(random.uniform(1.0, 5.0))
         while True:
-            if self.stop_requested or os.path.exists(".stop_requested"):
+            if self.stop_requested or os.path.exists(STOP_FILE):
                 pipeline_logger.info("STOP INITIATED: Domain worker halting Stage 1.")
                 break
             try:
@@ -478,12 +506,12 @@ class TypeCPipeline:
                 else:
                     try:
                         res = await asyncio.wait_for(
-                            process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager),
-                            timeout=75.0
+                            process_domain_stage1(browser, session, row, prompts, f_ids, h_map, nim_key_manager, nim_semaphore),
+                            timeout=1200.0
                         )
                     except asyncio.TimeoutError:
-                        pipeline_logger.error(f"DOMAIN TIMEOUT: {domain} exceeded 75s Stage 1 budget")
-                        res = {"type": "error", "reason": "Timeout", "scraper_used": "BU"}
+                        pipeline_logger.error(f"DOMAIN TIMEOUT: {domain} exceeded 1200s total budget")
+                        res = {"type": "error", "reason": "LLM failed - timeout", "scraper_used": "BU"}
                 
                 if "tokens" in res:
                     is_success = res.get("type") == "success"
@@ -514,7 +542,7 @@ class TypeCPipeline:
                         if not reason.startswith("LLM failed") and reason not in ("Low Content", "Low content", "Parked") and not reason.startswith("Missing"):
                             reason = "Unable To Scrap"
                         pipeline_logger.error(f"PIPELINE FAILED: {domain} | {reason}")
-                        await r_q.put({'range': f"H{idx}", 'values': [[reason[:500]]]})
+                        await r_q.put({'range': f"H{idx}", 'values': [[reason[:1000]]]})
                         
                         scraper_used = res.get("scraper_used", "BU")
                         await r_q.put({'range': f"S{idx}", 'values': [[scraper_used]]})
@@ -927,12 +955,12 @@ class TypeCPipeline:
                 "rate_limit_paused": pause_info["paused"],
                 "sleep_remaining_sec": pause_info["remaining"],
                 "rate_limit_message": pause_info["message"],
-                "is_stopping": self.stop_requested or os.path.exists(".stop_requested")
+                "is_stopping": self.stop_requested or os.path.exists(STOP_FILE)
             }
-            tmp_file = f".progress.json.tmp.{os.getpid()}"
+            tmp_file = f"{PROGRESS_FILE}.tmp.{os.getpid()}"
             with open(tmp_file, "w") as file:
                 json.dump(data, file)
-            os.replace(tmp_file, ".progress.json")
+            os.replace(tmp_file, PROGRESS_FILE)
         except: pass
 
 async def main():
