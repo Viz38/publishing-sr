@@ -85,6 +85,20 @@ class NIMKeyManager:
                 if val and val.startswith("nvapi-"):
                     extracted.append(val)
 
+            if not extracted:
+                try:
+                    fallback_tab = f"Copy of {self.tab_name}"
+                    ws_fb = await sh.worksheet(fallback_tab)
+                    fb_vals = await ws_fb.get_all_values()
+                    for r in fb_vals:
+                        if not r:
+                            continue
+                        val = str(r[0]).strip()
+                        if val and val.startswith("nvapi-"):
+                            extracted.append(val)
+                except Exception:
+                    pass
+
             async with self._cond:
                 for k in extracted:
                     if k not in self.invalid_keys and k not in self.keys:
@@ -186,7 +200,7 @@ async def call_nvidia_nim_api(
     model: Optional[str] = None,
     endpoint: Optional[str] = None,
     system_instruction: Optional[str] = None,
-    max_tokens: int = 2500,
+    max_tokens: int = 5000,
     temperature: float = 0.0,
     max_retries: int = 4
 ) -> LLMResult:
@@ -211,7 +225,10 @@ async def call_nvidia_nim_api(
         "messages": messages,
         "max_tokens": max_tokens,
         "temperature": temperature,
-        "stream": False
+        "stream": False,
+        "chat_template_kwargs": {
+            "enable_thinking": True
+        }
     }
 
     # Extended timeout for heavy reasoning models (e.g., meta/muse-glimmer-30b)
@@ -254,10 +271,13 @@ async def call_nvidia_nim_api(
                                 final_text = "Error: Incomplete LLM reasoning (token budget reached before output)"
                         
                         usage = data.get("usage", {})
+                        completion_details = usage.get("completion_tokens_details", {}) or {}
+                        reasoning_tokens = completion_details.get("reasoning_tokens", 0)
                         return LLMResult(
                             text=final_text,
                             prompt_tokens=usage.get("prompt_tokens", 0),
                             candidate_tokens=usage.get("completion_tokens", 0),
+                            thinking_tokens=reasoning_tokens,
                             thinking_text=reasoning,
                             success=True if final_text and not final_text.startswith("Error:") else False
                         )

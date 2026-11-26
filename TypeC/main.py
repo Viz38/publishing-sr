@@ -193,7 +193,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ni
     llm_calls = 0
     llm_rows = 1
     
-    user_p1 = f"Domain: {domain}\n\nExtract:\n{body[:4000]}"
+    user_p1 = f"<domain>{domain}</domain>\n\n<website_extract>\n{body[:4000]}\n</website_extract>"
     try:
         if nim_semaphore:
             async with nim_semaphore:
@@ -206,7 +206,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ni
                         endpoint=CONFIG.get("NVIDIA_API_URL"),
                         system_instruction=PROMPT_TYPE_C_TEMPLATE,
                         temperature=0.0,
-                        max_tokens=2500,
+                        max_tokens=5000,
                         max_retries=1
                     ),
                     timeout=310.0
@@ -221,7 +221,7 @@ async def process_domain_stage1(browser, session, row, prompts, f_ids, h_map, ni
                     endpoint=CONFIG.get("NVIDIA_API_URL"),
                     system_instruction=PROMPT_TYPE_C_TEMPLATE,
                     temperature=0.0,
-                    max_tokens=2500,
+                    max_tokens=5000,
                     max_retries=1
                 ),
                 timeout=310.0
